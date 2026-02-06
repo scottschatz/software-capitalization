@@ -109,4 +109,33 @@ describe('parseGitLog', () => {
     const allCommits = parseGitLog(TMP, { since: '2020-01-01' })
     expect(allCommits).toHaveLength(3)
   })
+
+  it('handles commit messages containing the separator |||', () => {
+    const sepDir = join(tmpdir(), 'cap-test-sep-' + Date.now())
+    mkdirSync(sepDir, { recursive: true })
+    execFileSync('git', ['-C', sepDir, 'init'], { encoding: 'utf-8' })
+    execFileSync('git', ['-C', sepDir, 'config', 'user.email', 'test@example.com'], { encoding: 'utf-8' })
+    execFileSync('git', ['-C', sepDir, 'config', 'user.name', 'Test User'], { encoding: 'utf-8' })
+
+    writeFileSync(join(sepDir, 'test.ts'), 'const x = 1\n')
+    execFileSync('git', ['-C', sepDir, 'add', 'test.ts'], { encoding: 'utf-8' })
+    execFileSync('git', ['-C', sepDir, 'commit', '-m', 'Fix issue ||| with pipes ||| in message'], { encoding: 'utf-8' })
+
+    const commits = parseGitLog(sepDir)
+    expect(commits).toHaveLength(1)
+    expect(commits[0].message).toBe('Fix issue ||| with pipes ||| in message')
+    expect(commits[0].authorEmail).toBe('test@example.com')
+
+    rmSync(sepDir, { recursive: true, force: true })
+  })
+
+  it('handles --until date filter', () => {
+    // An old until date should return nothing (all commits are recent)
+    const commits = parseGitLog(TMP, { until: '2020-01-01' })
+    expect(commits).toHaveLength(0)
+
+    // A future until date should return all
+    const allCommits = parseGitLog(TMP, { until: '2099-01-01' })
+    expect(allCommits).toHaveLength(3)
+  })
 })

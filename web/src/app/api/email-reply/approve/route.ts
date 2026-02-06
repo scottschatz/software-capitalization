@@ -76,6 +76,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Check developer is still active
+    const actor = await prisma.developer.findUnique({
+      where: { id: payload.developerId },
+      select: { active: true },
+    })
+    if (!actor?.active) {
+      return new NextResponse(renderResult('Account is deactivated', false), {
+        headers: { 'Content-Type': 'text/html' },
+        status: 403,
+      })
+    }
+
     if (payload.action === 'approve_all') {
       const dateObj = new Date(`${payload.date}T00:00:00.000Z`)
       const entries = await prisma.dailyEntry.findMany({

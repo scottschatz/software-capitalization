@@ -91,14 +91,16 @@ Respond with JSON:
 
     // Auto-apply if clear intent
     if (parsed.action === 'confirm_all') {
-      // Find today's pending entries
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
+      // Find pending entries from the last 7 days (not all-time)
+      const since = new Date()
+      since.setDate(since.getDate() - 7)
+      since.setHours(0, 0, 0, 0)
 
       const entries = await prisma.dailyEntry.findMany({
         where: {
           developerId: developer.id,
           status: 'pending',
+          date: { gte: since },
         },
         include: { project: { select: { phase: true } } },
       })

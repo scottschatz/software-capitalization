@@ -5,12 +5,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+NPX_PATH="$(which npx 2>/dev/null || echo "npx")"
 UNIT_DIR="$HOME/.config/systemd/user"
 
 mkdir -p "$UNIT_DIR"
 
-# Update service with correct paths for this machine
-sed "s|/home/sschatz/projects/software-capitalization|$SCRIPT_DIR/..|g" \
+# Update service with correct paths and npx binary for this machine
+sed -e "s|/home/sschatz/projects/software-capitalization|$PROJECT_DIR|g" \
+    -e "s|ExecStart=npx |ExecStart=$NPX_PATH |g" \
   "$SCRIPT_DIR/cap-sync.service" > "$UNIT_DIR/cap-sync.service"
 
 cp "$SCRIPT_DIR/cap-sync.timer" "$UNIT_DIR/cap-sync.timer"
