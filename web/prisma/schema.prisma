@@ -1,0 +1,452 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// DEVELOPERS & AUTHENTICATION
+// ============================================================
+
+model Developer {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  displayName   String    @map("display_name")
+  azureOid      String?   @unique @map("azure_oid")
+  role          String    @default("developer") // developer | manager | admin
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  // NextAuth required fields
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+
+  // Relations
+  agentKeys              AgentKey[]
+  rawSessions            RawSession[]
+  rawCommits             RawCommit[]
+  rawVscodeActivity      RawVscodeActivity[]
+  agentSyncLogs          AgentSyncLog[]
+  projectsCreated        Project[]
+  dailyEntries           DailyEntry[]
+  manualEntries          ManualEntry[]
+  dailyEntryRevisions    DailyEntryRevision[]
+  projectHistoryChanges  ProjectHistory[]
+  phaseChangeRequests    PhaseChangeRequest[]        @relation("PhaseChangeRequester")
+  phaseChangeReviews     PhaseChangeRequest[]        @relation("PhaseChangeReviewer")
+  entriesConfirmed       DailyEntry[]                @relation("EntryConfirmer")
+  emailLogs              EmailLog[]
+  monthlyReportsGenerated MonthlyReport[]
+
+  @@map("developers")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user Developer @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user Developer @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model AgentKey {
+  id           String    @id @default(uuid())
+  developerId  String    @map("developer_id")
+  keyHash      String    @unique @map("key_hash")
+  keyPrefix    String    @map("key_prefix") // first 12 chars for display
+  name         String    @default("Default")
+  active       Boolean   @default(true)
+  machineName  String?   @map("machine_name")
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  developer Developer    @relation(fields: [developerId], references: [id])
+  syncLogs  AgentSyncLog[]
+
+  @@map("agent_keys")
+}
+
+// ============================================================
+// IMMUTABLE RAW DATA TABLES
+// ============================================================
+
+model RawSession {
+  id                      String    @id @default(uuid())
+  developerId             String    @map("developer_id")
+  sessionId               String    @map("session_id")
+  projectPath             String    @map("project_path")
+  gitBranch               String?   @map("git_branch")
+  claudeVersion           String?   @map("claude_version")
+  slug                    String?
+  startedAt               DateTime  @map("started_at")
+  endedAt                 DateTime? @map("ended_at")
+  durationSeconds         Int?      @map("duration_seconds")
+  totalInputTokens        Int       @default(0) @map("total_input_tokens")
+  totalOutputTokens       Int       @default(0) @map("total_output_tokens")
+  totalCacheReadTokens    Int       @default(0) @map("total_cache_read_tokens")
+  totalCacheCreateTokens  Int       @default(0) @map("total_cache_create_tokens")
+  messageCount            Int       @default(0) @map("message_count")
+  toolUseCount            Int       @default(0) @map("tool_use_count")
+  model                   String?
+  rawJsonlPath            String?   @map("raw_jsonl_path")
+  isBackfill              Boolean   @default(false) @map("is_backfill")
+  syncLogId               String?   @map("sync_log_id")
+  syncedAt                DateTime  @default(now()) @map("synced_at")
+
+  developer Developer     @relation(fields: [developerId], references: [id])
+  syncLog   AgentSyncLog? @relation(fields: [syncLogId], references: [id])
+
+  @@unique([developerId, sessionId])
+  @@index([developerId, startedAt])
+  @@index([projectPath])
+  @@map("raw_sessions")
+}
+
+model RawCommit {
+  id           String   @id @default(uuid())
+  developerId  String   @map("developer_id")
+  commitHash   String   @map("commit_hash")
+  repoPath     String   @map("repo_path")
+  branch       String?
+  authorName   String   @map("author_name")
+  authorEmail  String   @map("author_email")
+  committedAt  DateTime @map("committed_at")
+  message      String
+  filesChanged Int      @default(0) @map("files_changed")
+  insertions   Int      @default(0)
+  deletions    Int      @default(0)
+  isBackfill   Boolean  @default(false) @map("is_backfill")
+  syncLogId    String?  @map("sync_log_id")
+  syncedAt     DateTime @default(now()) @map("synced_at")
+
+  developer Developer     @relation(fields: [developerId], references: [id])
+  syncLog   AgentSyncLog? @relation(fields: [syncLogId], references: [id])
+
+  @@unique([commitHash, repoPath])
+  @@index([developerId, committedAt])
+  @@index([repoPath])
+  @@map("raw_commits")
+}
+
+model RawVscodeActivity {
+  id              String   @id @default(uuid())
+  developerId     String   @map("developer_id")
+  date            DateTime @db.Date
+  projectName     String   @map("project_name")
+  language        String?
+  durationMinutes Float    @map("duration_minutes")
+  editor          String   @default("vscode")
+  isBackfill      Boolean  @default(false) @map("is_backfill")
+  syncLogId       String?  @map("sync_log_id")
+  syncedAt        DateTime @default(now()) @map("synced_at")
+
+  developer Developer     @relation(fields: [developerId], references: [id])
+  syncLog   AgentSyncLog? @relation(fields: [syncLogId], references: [id])
+
+  @@index([developerId, date])
+  @@map("raw_vscode_activity")
+}
+
+model AgentSyncLog {
+  id            String    @id @default(uuid())
+  developerId   String    @map("developer_id")
+  agentKeyId    String    @map("agent_key_id")
+  syncType      String    @map("sync_type") // incremental | backfill
+  startedAt     DateTime  @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  status        String    @default("running") // running | completed | failed
+  sessionsCount Int       @default(0) @map("sessions_count")
+  commitsCount  Int       @default(0) @map("commits_count")
+  vscodeCount   Int       @default(0) @map("vscode_count")
+  errorMessage  String?   @map("error_message")
+  fromDate      DateTime? @map("from_date")
+  toDate        DateTime? @map("to_date")
+
+  developer         Developer           @relation(fields: [developerId], references: [id])
+  agentKey          AgentKey            @relation(fields: [agentKeyId], references: [id])
+  rawSessions       RawSession[]
+  rawCommits        RawCommit[]
+  rawVscodeActivity RawVscodeActivity[]
+
+  @@index([developerId, startedAt])
+  @@map("agent_sync_log")
+}
+
+// ============================================================
+// PROJECTS
+// ============================================================
+
+model Project {
+  id                     String    @id @default(uuid())
+  name                   String
+  description            String?
+  businessJustification  String?   @map("business_justification")
+
+  // ASC 350-40 phase
+  phase                  String    @default("application_development")
+  // preliminary | application_development | post_implementation
+
+  // ASU 2025-06 fields
+  managementAuthorized   Boolean   @default(false) @map("management_authorized")
+  authorizationDate      DateTime? @map("authorization_date") @db.Date
+  authorizationEvidence  String?   @map("authorization_evidence")
+  probableToComplete     Boolean   @default(true) @map("probable_to_complete")
+  developmentUncertainty String    @default("low") @map("development_uncertainty")
+  // low | medium | high
+
+  status                 String    @default("active")
+  // active | paused | completed | abandoned
+  expectedCompletion     DateTime? @map("expected_completion") @db.Date
+
+  createdById            String    @map("created_by_id")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  createdBy          Developer           @relation(fields: [createdById], references: [id])
+  repos              ProjectRepo[]
+  claudePaths        ProjectClaudePath[]
+  history            ProjectHistory[]
+  phaseChangeRequests PhaseChangeRequest[]
+  dailyEntries       DailyEntry[]
+  manualEntries      ManualEntry[]
+  monthlyReports     MonthlyReport[]
+
+  @@map("projects")
+}
+
+model ProjectRepo {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  repoPath  String   @map("repo_path")
+  repoUrl   String?  @map("repo_url")
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, repoPath])
+  @@map("project_repos")
+}
+
+model ProjectClaudePath {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  claudePath String  @map("claude_path") // e.g. -home-sschatz-projects-foo
+  localPath  String  @map("local_path")  // e.g. /home/sschatz/projects/foo
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, claudePath])
+  @@map("project_claude_paths")
+}
+
+model ProjectHistory {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  changedById String   @map("changed_by_id")
+  field       String
+  oldValue    String?  @map("old_value")
+  newValue    String?  @map("new_value")
+  changedAt   DateTime @default(now()) @map("changed_at")
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changedBy Developer @relation(fields: [changedById], references: [id])
+
+  @@index([projectId, changedAt])
+  @@map("project_history")
+}
+
+model PhaseChangeRequest {
+  id              String    @id @default(uuid())
+  projectId       String    @map("project_id")
+  requestedById   String    @map("requested_by_id")
+  currentPhase    String    @map("current_phase")
+  requestedPhase  String    @map("requested_phase")
+  reason          String
+  status          String    @default("pending") // pending | approved | rejected
+  reviewedById    String?   @map("reviewed_by_id")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewNote      String?   @map("review_note")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedBy Developer @relation("PhaseChangeRequester", fields: [requestedById], references: [id])
+  reviewedBy  Developer? @relation("PhaseChangeReviewer", fields: [reviewedById], references: [id])
+
+  @@index([projectId, status])
+  @@map("phase_change_requests")
+}
+
+// ============================================================
+// DAILY ENTRIES & MANUAL ENTRIES
+// ============================================================
+
+model DailyEntry {
+  id                   String    @id @default(uuid())
+  developerId          String    @map("developer_id")
+  date                 DateTime  @db.Date
+  projectId            String?   @map("project_id")
+
+  // Auto-generated by AI
+  hoursEstimated       Float?    @map("hours_estimated")
+  phaseAuto            String?   @map("phase_auto")
+  descriptionAuto      String?   @map("description_auto") @db.Text
+  sourceSessionIds     String[]  @map("source_session_ids")
+  sourceCommitIds      String[]  @map("source_commit_ids")
+
+  // Developer-confirmed (null until confirmed)
+  hoursConfirmed       Float?    @map("hours_confirmed")
+  phaseConfirmed       String?   @map("phase_confirmed")
+  descriptionConfirmed String?   @map("description_confirmed") @db.Text
+  confirmedAt          DateTime? @map("confirmed_at")
+  confirmedById        String?   @map("confirmed_by_id")
+  adjustmentReason     String?   @map("adjustment_reason")
+
+  status               String    @default("pending")
+  // pending | confirmed | flagged | disputed
+
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  developer   Developer            @relation(fields: [developerId], references: [id])
+  project     Project?             @relation(fields: [projectId], references: [id])
+  confirmedBy Developer?            @relation("EntryConfirmer", fields: [confirmedById], references: [id])
+  revisions   DailyEntryRevision[]
+
+  @@unique([developerId, date, projectId])
+  @@index([date])
+  @@index([status])
+  @@map("daily_entries")
+}
+
+model ManualEntry {
+  id          String   @id @default(uuid())
+  developerId String   @map("developer_id")
+  date        DateTime @db.Date
+  projectId   String   @map("project_id")
+  hours       Float
+  phase       String
+  description String   @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  developer Developer @relation(fields: [developerId], references: [id])
+  project   Project   @relation(fields: [projectId], references: [id])
+
+  @@index([developerId, date])
+  @@map("manual_entries")
+}
+
+model DailyEntryRevision {
+  id           String   @id @default(uuid())
+  entryId      String   @map("entry_id")
+  revision     Int
+  changedById  String   @map("changed_by_id")
+  field        String
+  oldValue     String?  @map("old_value")
+  newValue     String?  @map("new_value")
+  reason       String?
+  changedAt    DateTime @default(now()) @map("changed_at")
+
+  entry     DailyEntry @relation(fields: [entryId], references: [id])
+  changedBy Developer  @relation(fields: [changedById], references: [id])
+
+  @@index([entryId])
+  @@map("daily_entry_revisions")
+}
+
+// ============================================================
+// EMAIL & REPLIES
+// ============================================================
+
+model EmailLog {
+  id          String    @id @default(uuid())
+  recipientId String    @map("recipient_id")
+  type        String    // daily_review | reminder | phase_approval
+  subject     String
+  actionToken String?   @map("action_token") // signed JWT for quick-reply links
+  sentAt      DateTime  @default(now()) @map("sent_at")
+
+  recipient Developer   @relation(fields: [recipientId], references: [id])
+  replies   EmailReply[]
+
+  @@index([recipientId, sentAt])
+  @@map("email_log")
+}
+
+model EmailReply {
+  id                 String    @id @default(uuid())
+  emailLogId         String    @map("email_log_id")
+  receivedAt         DateTime  @default(now()) @map("received_at")
+  rawBody            String?   @map("raw_body") @db.Text
+  aiInterpretation   String?   @map("ai_interpretation")
+  actionTaken        String?   @map("action_taken")
+  confirmationSent   Boolean   @default(false) @map("confirmation_sent")
+
+  emailLog EmailLog @relation(fields: [emailLogId], references: [id])
+
+  @@map("email_replies")
+}
+
+// ============================================================
+// REPORTS
+// ============================================================
+
+model MonthlyReport {
+  id           String    @id @default(uuid())
+  projectId    String    @map("project_id")
+  year         Int
+  month        Int
+  totalHours   Float     @default(0) @map("total_hours")
+  capHours     Float     @default(0) @map("capitalizable_hours")
+  expHours     Float     @default(0) @map("expensed_hours")
+  reportData   Json?     @map("report_data")
+  status       String    @default("draft") // draft | reviewed | approved | submitted
+  generatedById String?  @map("generated_by_id")
+  generatedAt  DateTime  @default(now()) @map("generated_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  project     Project    @relation(fields: [projectId], references: [id])
+  generatedBy Developer? @relation(fields: [generatedById], references: [id])
+
+  @@unique([projectId, year, month])
+  @@map("monthly_reports")
+}

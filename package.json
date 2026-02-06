@@ -1,0 +1,17 @@
+{
+  "name": "software-capitalization",
+  "private": true,
+  "workspaces": [
+    "web",
+    "agent"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=web",
+    "build": "npm run build --workspace=web",
+    "agent": "npm run dev --workspace=agent",
+    "db:generate": "npx prisma generate --schema=web/prisma/schema.prisma",
+    "db:migrate": "npx prisma migrate dev --schema=web/prisma/schema.prisma",
+    "db:push": "npx prisma db push --schema=web/prisma/schema.prisma",
+    "db:studio": "npx prisma studio --schema=web/prisma/schema.prisma"
+  }
+}
