@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 
 type RouteParams = { params: Promise<{ date: string }> }
 
-// GET /api/entries/[date] — Get daily entries for the current user on a given date
+// GET /api/entries/by-date/[date] — Get daily entries for the current user on a given date
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
