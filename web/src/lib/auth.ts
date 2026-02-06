@@ -22,8 +22,8 @@ if (process.env.AZURE_AD_CLIENT_ID && process.env.AZURE_AD_CLIENT_SECRET) {
   )
 }
 
-// Dev bypass (local development only)
-if (process.env.DEV_AUTH_BYPASS === 'true') {
+// Dev bypass (local development only — blocked in production)
+if (process.env.DEV_AUTH_BYPASS === 'true' && process.env.NODE_ENV !== 'production') {
   providers.push(
     CredentialsProvider({
       id: 'dev-bypass',

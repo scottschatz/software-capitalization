@@ -17,8 +17,10 @@ export async function getDeveloper(): Promise<DeveloperSession | null> {
 
   const developer = await prisma.developer.findUnique({
     where: { email },
-    select: { id: true, email: true, displayName: true, role: true },
+    select: { id: true, email: true, displayName: true, role: true, active: true },
   })
+
+  if (!developer || !developer.active) return null
 
   return developer
 }

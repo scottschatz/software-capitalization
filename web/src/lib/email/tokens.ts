@@ -1,6 +1,17 @@
 import jwt from 'jsonwebtoken'
 
-const JWT_SECRET = process.env.EMAIL_JWT_SECRET || process.env.NEXTAUTH_SECRET || 'dev-secret'
+function getJwtSecret(): string {
+  const secret = process.env.EMAIL_JWT_SECRET || process.env.NEXTAUTH_SECRET
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('EMAIL_JWT_SECRET or NEXTAUTH_SECRET must be set in production')
+    }
+    return 'dev-secret-local-only'
+  }
+  return secret
+}
+
+const JWT_SECRET = getJwtSecret()
 const TOKEN_EXPIRY = '72h'
 
 export interface EmailActionPayload {

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Cap Tracker sync every 2 hours during business hours
+
+[Timer]
+OnCalendar=Mon..Fri 08,10,12,14,16,18:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

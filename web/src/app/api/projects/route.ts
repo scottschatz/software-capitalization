@@ -24,8 +24,13 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const projects = await listProjects(query.data)
-  return NextResponse.json(projects)
+  try {
+    const projects = await listProjects(query.data)
+    return NextResponse.json(projects)
+  } catch (err) {
+    console.error('Error listing projects:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }
 
 // POST /api/projects — Create a new project
@@ -45,6 +50,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const project = await createProject(parsed.data, developer.id)
-  return NextResponse.json(project, { status: 201 })
+  try {
+    const project = await createProject(parsed.data, developer.id)
+    return NextResponse.json(project, { status: 201 })
+  } catch (err) {
+    console.error('Error creating project:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

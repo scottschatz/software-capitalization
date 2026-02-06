@@ -22,6 +22,9 @@ export async function authenticateAgent(request: NextRequest) {
 
   if (!agentKey || !agentKey.active) return null
 
+  // Check developer is active
+  if (!agentKey.developer.active) return null
+
   // Update last used timestamp
   await prisma.agentKey.update({
     where: { id: agentKey.id },

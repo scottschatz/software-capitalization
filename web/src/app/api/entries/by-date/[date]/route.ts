@@ -14,32 +14,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   const { date } = await params
   const dateObj = new Date(`${date}T00:00:00.000Z`)
 
-  const entries = await prisma.dailyEntry.findMany({
-    where: {
-      developerId: developer.id,
-      date: dateObj,
-    },
-    include: {
-      project: {
-        select: { id: true, name: true, phase: true },
+  try {
+    const entries = await prisma.dailyEntry.findMany({
+      where: {
+        developerId: developer.id,
+        date: dateObj,
       },
-    },
-    orderBy: { createdAt: 'asc' },
-  })
-
-  // Also fetch manual entries for this date
-  const manualEntries = await prisma.manualEntry.findMany({
-    where: {
-      developerId: developer.id,
-      date: dateObj,
-    },
-    include: {
-      project: {
-        select: { id: true, name: true, phase: true },
+      include: {
+        project: {
+          select: { id: true, name: true, phase: true },
+        },
       },
-    },
-    orderBy: { createdAt: 'asc' },
-  })
+      orderBy: { createdAt: 'asc' },
+    })
 
-  return NextResponse.json({ entries, manualEntries })
+    // Also fetch manual entries for this date
+    const manualEntries = await prisma.manualEntry.findMany({
+      where: {
+        developerId: developer.id,
+        date: dateObj,
+      },
+      include: {
+        project: {
+          select: { id: true, name: true, phase: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    return NextResponse.json({ entries, manualEntries })
+  } catch (err) {
+    console.error('Error in fetching entries by date:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

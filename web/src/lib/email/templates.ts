@@ -2,6 +2,15 @@ import { createActionToken } from './tokens'
 
 const BASE_URL = process.env.NEXTAUTH_URL || 'http://localhost:3000'
 
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 interface DailyReviewEmailData {
   developerName: string
   developerId: string
@@ -36,12 +45,12 @@ export function buildDailyReviewEmail(data: DailyReviewEmailData): {
     .map(
       (e) => `
     <tr>
-      <td style="padding:8px;border-bottom:1px solid #eee;">${e.projectName}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(e.projectName)}</td>
       <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${e.hours}h</td>
       <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
         ${e.capitalizable ? '<span style="color:#16a34a;">Capitalized</span>' : '<span style="color:#6b7280;">Expensed</span>'}
       </td>
-      <td style="padding:8px;border-bottom:1px solid #eee;">${e.description}</td>
+      <td style="padding:8px;border-bottom:1px solid #eee;">${escapeHtml(e.description)}</td>
     </tr>`
     )
     .join('')
@@ -51,8 +60,8 @@ export function buildDailyReviewEmail(data: DailyReviewEmailData): {
     html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
         <h2 style="color:#1a1a1a;">Daily Activity Summary</h2>
-        <p>Hi ${data.developerName},</p>
-        <p>Here's your development activity for <strong>${data.date}</strong>:</p>
+        <p>Hi ${escapeHtml(data.developerName)},</p>
+        <p>Here's your development activity for <strong>${escapeHtml(data.date)}</strong>:</p>
 
         <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin:16px 0;">
           <span style="font-size:20px;font-weight:bold;">${totalHours.toFixed(1)}h total</span>
@@ -141,13 +150,13 @@ export function buildPhaseChangeEmail(data: PhaseChangeEmailData): {
     html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
         <h2 style="color:#1a1a1a;">Phase Change Request</h2>
-        <p>Hi ${data.adminName},</p>
-        <p><strong>${data.requesterName}</strong> has requested a phase change for <strong>${data.projectName}</strong>:</p>
+        <p>Hi ${escapeHtml(data.adminName)},</p>
+        <p><strong>${escapeHtml(data.requesterName)}</strong> has requested a phase change for <strong>${escapeHtml(data.projectName)}</strong>:</p>
 
         <div style="background:#f8f9fa;padding:16px;border-radius:8px;margin:16px 0;">
-          <p style="margin:4px 0;"><strong>Current Phase:</strong> ${phaseLabels[data.currentPhase] ?? data.currentPhase}</p>
-          <p style="margin:4px 0;"><strong>Requested Phase:</strong> ${phaseLabels[data.requestedPhase] ?? data.requestedPhase}</p>
-          <p style="margin:4px 0;"><strong>Reason:</strong> ${data.reason}</p>
+          <p style="margin:4px 0;"><strong>Current Phase:</strong> ${escapeHtml(phaseLabels[data.currentPhase] ?? data.currentPhase)}</p>
+          <p style="margin:4px 0;"><strong>Requested Phase:</strong> ${escapeHtml(phaseLabels[data.requestedPhase] ?? data.requestedPhase)}</p>
+          <p style="margin:4px 0;"><strong>Reason:</strong> ${escapeHtml(data.reason)}</p>
         </div>
 
         <div style="margin:24px 0;text-align:center;">

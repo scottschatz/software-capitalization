@@ -30,19 +30,24 @@ export async function POST(request: NextRequest) {
 
   const { date, projectId, hours, phase, description } = parsed.data
 
-  const entry = await prisma.manualEntry.create({
-    data: {
-      developerId: developer.id,
-      date: new Date(`${date}T00:00:00.000Z`),
-      projectId,
-      hours,
-      phase,
-      description,
-    },
-    include: {
-      project: { select: { id: true, name: true, phase: true } },
-    },
-  })
+  try {
+    const entry = await prisma.manualEntry.create({
+      data: {
+        developerId: developer.id,
+        date: new Date(`${date}T00:00:00.000Z`),
+        projectId,
+        hours,
+        phase,
+        description,
+      },
+      include: {
+        project: { select: { id: true, name: true, phase: true } },
+      },
+    })
 
-  return NextResponse.json(entry, { status: 201 })
+    return NextResponse.json(entry, { status: 201 })
+  } catch (err) {
+    console.error('Error in creating manual entry:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

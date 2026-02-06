@@ -35,4 +35,7 @@ program
     await statusCommand()
   })
 
-program.parse()
+program.parseAsync().catch((err) => {
+  console.error(err.message || err)
+  process.exit(1)
+})

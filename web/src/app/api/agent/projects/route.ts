@@ -9,28 +9,33 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid or missing API key' }, { status: 401 })
   }
 
-  const projects = await prisma.project.findMany({
-    where: { status: { not: 'abandoned' } },
-    select: {
-      id: true,
-      name: true,
-      phase: true,
-      status: true,
-      repos: {
-        select: {
-          repoPath: true,
-          repoUrl: true,
+  try {
+    const projects = await prisma.project.findMany({
+      where: { status: { not: 'abandoned' } },
+      select: {
+        id: true,
+        name: true,
+        phase: true,
+        status: true,
+        repos: {
+          select: {
+            repoPath: true,
+            repoUrl: true,
+          },
+        },
+        claudePaths: {
+          select: {
+            claudePath: true,
+            localPath: true,
+          },
         },
       },
-      claudePaths: {
-        select: {
-          claudePath: true,
-          localPath: true,
-        },
-      },
-    },
-    orderBy: { name: 'asc' },
-  })
+      orderBy: { name: 'asc' },
+    })
 
-  return NextResponse.json(projects)
+    return NextResponse.json(projects)
+  } catch (err) {
+    console.error('Error in fetching agent projects:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

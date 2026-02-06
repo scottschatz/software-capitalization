@@ -23,35 +23,40 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const monthDate = parse(`${monthParam}-01`, 'yyyy-MM-dd', new Date())
-  const startDate = format(startOfMonth(monthDate), 'yyyy-MM-dd')
-  const endDate = format(endOfMonth(monthDate), 'yyyy-MM-dd')
-  const developerId = request.nextUrl.searchParams.get('developerId') ?? undefined
-  const projectId = request.nextUrl.searchParams.get('projectId') ?? undefined
+  try {
+    const monthDate = parse(`${monthParam}-01`, 'yyyy-MM-dd', new Date())
+    const startDate = format(startOfMonth(monthDate), 'yyyy-MM-dd')
+    const endDate = format(endOfMonth(monthDate), 'yyyy-MM-dd')
+    const developerId = request.nextUrl.searchParams.get('developerId') ?? undefined
+    const projectId = request.nextUrl.searchParams.get('projectId') ?? undefined
 
-  const filters = { startDate, endDate, developerId, projectId }
+    const filters = { startDate, endDate, developerId, projectId }
 
-  const [dailyEntries, manualEntries, byProject, byDeveloper] = await Promise.all([
-    queryDailyEntries({ ...filters, status: 'confirmed' }),
-    queryManualEntries(filters),
-    aggregateByProject(filters),
-    aggregateByDeveloper(filters),
-  ])
+    const [dailyEntries, manualEntries, byProject, byDeveloper] = await Promise.all([
+      queryDailyEntries({ ...filters, status: 'confirmed' }),
+      queryManualEntries(filters),
+      aggregateByProject(filters),
+      aggregateByDeveloper(filters),
+    ])
 
-  const totalHours = byProject.reduce((s, p) => s + p.totalHours, 0)
-  const capHours = byProject.reduce((s, p) => s + p.capHours, 0)
-  const expHours = byProject.reduce((s, p) => s + p.expHours, 0)
+    const totalHours = byProject.reduce((s, p) => s + p.totalHours, 0)
+    const capHours = byProject.reduce((s, p) => s + p.capHours, 0)
+    const expHours = byProject.reduce((s, p) => s + p.expHours, 0)
 
-  return NextResponse.json({
-    month: monthParam,
-    startDate,
-    endDate,
-    summary: { totalHours, capHours, expHours },
-    byProject,
-    byDeveloper,
-    entryCounts: {
-      daily: dailyEntries.length,
-      manual: manualEntries.length,
-    },
-  })
+    return NextResponse.json({
+      month: monthParam,
+      startDate,
+      endDate,
+      summary: { totalHours, capHours, expHours },
+      byProject,
+      byDeveloper,
+      entryCounts: {
+        daily: dailyEntries.length,
+        manual: manualEntries.length,
+      },
+    })
+  } catch (err) {
+    console.error('Error in monthly report:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

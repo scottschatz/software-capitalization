@@ -47,8 +47,18 @@ export function parseGitLog(
       maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large repos
       timeout: 30_000,
     })
-  } catch {
-    // Repo might not exist or not be a git repo
+  } catch (err: unknown) {
+    const error = err as { code?: string; status?: number }
+    // Only silently return empty for "not a git repo" errors (exit code 128)
+    if (error.status === 128) return []
+    // Log other errors (buffer overflow, timeout, etc.)
+    if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      console.error(`Warning: git log output exceeded buffer for ${repoPath}. Some commits may be missing.`)
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error(`Warning: git log timed out for ${repoPath}`)
+    } else {
+      console.error(`Warning: git log failed for ${repoPath}:`, (err as Error).message ?? err)
+    }
     return []
   }
 
@@ -79,7 +89,8 @@ export function parseGitLog(
     const parts = headerLine.split(SEPARATOR)
     if (parts.length < 5) continue
 
-    const [commitHash, authorName, authorEmail, committedAt, message] = parts
+    const [commitHash, authorName, authorEmail, committedAt, ...messageParts] = parts
+    const message = messageParts.join(SEPARATOR)
 
     // Parse numstat lines (additions\tdeletions\tfilename)
     let filesChanged = 0

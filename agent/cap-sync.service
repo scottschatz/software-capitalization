@@ -1,0 +1,12 @@
+[Unit]
+Description=Cap Tracker Agent - Sync development activity data
+After=network.target
+
+[Service]
+Type=oneshot
+User=%i
+ExecStart=/usr/bin/npx tsx /home/sschatz/projects/software-capitalization/agent/src/cli.ts sync
+WorkingDirectory=/home/sschatz/projects/software-capitalization
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal

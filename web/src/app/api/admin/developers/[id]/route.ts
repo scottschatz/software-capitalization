@@ -45,22 +45,27 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     )
   }
 
-  const target = await prisma.developer.findUnique({ where: { id } })
-  if (!target) {
-    return NextResponse.json({ error: 'Developer not found' }, { status: 404 })
+  try {
+    const target = await prisma.developer.findUnique({ where: { id } })
+    if (!target) {
+      return NextResponse.json({ error: 'Developer not found' }, { status: 404 })
+    }
+
+    const updated = await prisma.developer.update({
+      where: { id },
+      data: parsed.data,
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        role: true,
+        active: true,
+      },
+    })
+
+    return NextResponse.json(updated)
+  } catch (err) {
+    console.error('Error in updating developer:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-
-  const updated = await prisma.developer.update({
-    where: { id },
-    data: parsed.data,
-    select: {
-      id: true,
-      email: true,
-      displayName: true,
-      role: true,
-      active: true,
-    },
-  })
-
-  return NextResponse.json(updated)
 }

@@ -12,6 +12,11 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}))
   const targetDate = body.date ? new Date(body.date) : undefined
 
-  const result = await generateEntriesForDate(targetDate)
-  return NextResponse.json(result)
+  try {
+    const result = await generateEntriesForDate(targetDate)
+    return NextResponse.json(result)
+  } catch (err) {
+    console.error('Error in generating entries:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }
