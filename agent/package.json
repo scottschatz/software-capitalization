@@ -10,15 +10,18 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "commander": "^14.0.0",
     "date-fns": "^4.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   }
 }
