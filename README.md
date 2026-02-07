@@ -89,7 +89,7 @@ npx tsx agent/src/cli.ts hooks install
 
 This registers hooks in `~/.claude/settings.json` that fire automatically every time Claude Code uses a tool (Edit, Read, Bash, etc.). The hooks are silent and add zero latency — they fire-and-forget a background HTTP request.
 
-**Important: VSCode users** — Hooks currently do not fire in VSCode's Native UI panel ([known issue](https://github.com/anthropics/claude-code/issues/8985)). If you use Claude Code via the terminal (either standalone or with `claudeCode.useTerminal: true` in VSCode settings), hooks work as expected. If you prefer the VSCode Native UI, skip this step — agent sync still captures everything needed for accurate time tracking.
+**Note:** Hooks work in both the VSCode Claude extension and the terminal CLI.
 
 To check status or remove:
 ```bash
@@ -252,9 +252,9 @@ The system computes **gap-aware active time** rather than simple wall-clock dura
 1. All message timestamps in a session are sorted chronologically
 2. Consecutive intervals where the gap is **< 15 minutes** are summed as "active time"
 3. Gaps **>= 15 minutes** are treated as breaks/idle (excluded)
-4. The AI uses this active time as its primary guide, then applies a ~40% multiplier to estimate human-active hours (since the AI does most of the typing)
+4. The AI uses this active time as its primary guide, then applies a **50% multiplier** to estimate human-active hours (during AI-assisted coding, the developer is focused on the task about half the time and multitasking the other half)
 
-**Example**: A session spanning 8:47 AM – 11:16 PM (14.5h wall clock) with a 9-hour lunch break and two work clusters would show ~4.3h active time, leading to an AI estimate of ~2-3h human development time.
+**Example**: A session spanning 8:47 AM – 11:16 PM (14.5h wall clock) with a 9-hour lunch break and two work clusters would show ~4.3h active time, leading to an AI estimate of ~2.2h human development time.
 
 ## Key Commands
 

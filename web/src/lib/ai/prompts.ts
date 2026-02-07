@@ -235,8 +235,8 @@ For each entry estimate:
      - **Gaps** between prompts (>15 min = break already excluded from active time)
      - **Frequency** of prompts (many prompts close together = actively engaged)
      - **Content** of prompts ("continue" = passive monitoring, count as ~1 min; detailed technical instructions = active directing, count as ~5 min)
-   - **AI does most of the typing.** The developer directs (writes prompts), reviews AI output, and iterates. Between prompts, the AI is working autonomously — that's not human active time. The human portion is typically 30-50% of the "Active time".
-   - **Practical heuristic**: Start with the "Active time" value (already excludes breaks). Multiply by ~0.4 to estimate human-active hours (reading AI output, thinking, writing prompts). Cross-check against prompt count (each prompt cycle ≈ 3-5 min of human time) and commits.
+   - **50% rule of thumb.** During active AI-assisted coding, the developer is typically focused on the task about half the time (reading AI output, reviewing code, writing prompts, testing) and multitasking or context-switching the other half. So: **Active time × 0.5 = estimated human development hours.**
+   - **Practical heuristic**: Start with the "Active time" value (already excludes breaks). Multiply by 0.5 to estimate human-active hours. Cross-check against prompt count (each prompt cycle ≈ 3-5 min of human time) and commits. Use whichever method gives the more conservative estimate.
    - **Maximum reasonable workday is 8 hours.** Most days should be 2-5 hours total across all projects.
    - **Use commits for scope validation.** Commits confirm what was actually produced. ~20-40 minutes of human time per commit of moderate complexity.
    - Be conservative — overestimating is worse than underestimating for capitalization compliance.
