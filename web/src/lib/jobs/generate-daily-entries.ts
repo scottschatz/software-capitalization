@@ -74,7 +74,7 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
     select: { id: true, email: true, displayName: true },
   })
 
-  // Get all monitored, non-abandoned projects with repos and claude paths
+  // Get all monitored, non-abandoned projects with repos, claude paths, and lifecycle fields
   const projects = await prisma.project.findMany({
     where: { status: { not: 'abandoned' }, monitored: true },
     include: {
@@ -82,6 +82,7 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       claudePaths: { select: { claudePath: true, localPath: true } },
     },
   })
+  // Note: goLiveDate, parentProjectId, enhancementLabel are direct fields on Project
 
   for (const developer of developers) {
     // Check if entries already exist for this date
@@ -218,6 +219,9 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
         name: p.name,
         phase: p.phase,
         description: p.description,
+        goLiveDate: p.goLiveDate,
+        parentProjectId: p.parentProjectId,
+        enhancementLabel: p.enhancementLabel,
         repos: p.repos,
         claudePaths: p.claudePaths,
       })),
@@ -255,6 +259,12 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
           .filter((c) => projectRepoPaths.includes(c.repoPath))
           .map((c) => c.id)
 
+        // Flag entries where AI detected enhancement work on post-impl projects
+        const status = entry.enhancementSuggested ? 'flagged' : 'pending'
+        const enhancementNote = entry.enhancementSuggested && entry.enhancementReason
+          ? `\n\n⚠️ Enhancement Suggested: ${entry.enhancementReason}`
+          : ''
+
         await prisma.dailyEntry.create({
           data: {
             developerId: developer.id,
@@ -262,10 +272,10 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
             projectId: entry.projectId,
             hoursEstimated: entry.hoursEstimate,
             phaseAuto: entry.phase,
-            descriptionAuto: `${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}`,
+            descriptionAuto: `${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}${enhancementNote}`,
             sourceSessionIds,
             sourceCommitIds,
-            status: 'pending',
+            status,
           },
         })
         entriesCreated++

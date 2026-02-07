@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireDeveloper } from '@/lib/get-developer'
-import { getProject } from '@/lib/actions/project-actions'
+import { getProject, listEnhancementProjects } from '@/lib/actions/project-actions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,7 @@ import {
 import { PhaseBadge, StatusBadge } from '@/components/projects/phase-badge'
 import { PhaseChangeDialog } from '@/components/projects/phase-change-dialog'
 import { PhaseChangeReview } from '@/components/projects/phase-change-review'
+import { CreateEnhancementDialog } from '@/components/projects/create-enhancement-dialog'
 import { Pencil, GitBranch, FolderCode } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -43,11 +44,25 @@ export default async function ProjectDetailPage({
     notFound()
   }
 
-  const canReview = developer.role === 'admin' && developer.email === APPROVAL_EMAIL
+  const isAdmin = developer.role === 'admin' && developer.email === APPROVAL_EMAIL
+  const canReview = isAdmin
   const capitalizable = project.phase === 'application_development'
+  const isEnhancement = !!project.parentProjectId
+  const isPostImpl = project.phase === 'post_implementation'
+  const enhancements = isPostImpl && !isEnhancement ? await listEnhancementProjects(id) : []
 
   return (
     <div className="space-y-6">
+      {/* Parent project breadcrumb for enhancement projects */}
+      {isEnhancement && project.parentProjectId && (
+        <div className="text-sm text-muted-foreground">
+          Enhancement of{' '}
+          <Link href={`/projects/${project.parentProjectId}`} className="underline hover:text-foreground">
+            parent project
+          </Link>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-1">
@@ -60,13 +75,27 @@ export default async function ProjectDetailPage({
             ) : (
               <Badge variant="outline" className="text-muted-foreground">Expensed</Badge>
             )}
+            {isEnhancement && (
+              <Badge variant="outline" className="border-blue-300 text-blue-700">Enhancement</Badge>
+            )}
           </div>
           {project.description && (
             <p className="text-muted-foreground">{project.description}</p>
           )}
+          {/* Go-live date and phase effective date */}
+          {(project.goLiveDate || project.phaseEffectiveDate) && (
+            <div className="flex gap-4 text-xs text-muted-foreground">
+              {project.goLiveDate && (
+                <span>Go-live: {format(new Date(project.goLiveDate), 'MMM d, yyyy')}</span>
+              )}
+              {project.phaseEffectiveDate && (
+                <span>Phase effective: {format(new Date(project.phaseEffectiveDate), 'MMM d, yyyy')}</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
-          <PhaseChangeDialog projectId={project.id} currentPhase={project.phase} />
+          <PhaseChangeDialog projectId={project.id} currentPhase={project.phase} isAdmin={isAdmin} />
           <Link href={`/projects/${project.id}/edit`}>
             <Button variant="outline" size="sm">
               <Pencil className="h-4 w-4 mr-1" /> Edit
@@ -88,6 +117,16 @@ export default async function ProjectDetailPage({
             )}
           </TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
+          {isPostImpl && !isEnhancement && (
+            <TabsTrigger value="enhancements">
+              Enhancements
+              {enhancements.length > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                  {enhancements.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Overview Tab */}
@@ -116,6 +155,12 @@ export default async function ProjectDetailPage({
                   <span className="text-muted-foreground">Development Uncertainty</span>
                   <span className="capitalize">{project.developmentUncertainty}</span>
                 </div>
+                {project.goLiveDate && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Go-Live Date</span>
+                    <span>{format(new Date(project.goLiveDate), 'MMM d, yyyy')}</span>
+                  </div>
+                )}
                 {project.expectedCompletion && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Expected Completion</span>
@@ -296,6 +341,50 @@ export default async function ProjectDetailPage({
             Activity data will appear here once the agent begins syncing session and commit data.
           </p>
         </TabsContent>
+
+        {/* Enhancements Tab — only for post-impl parent projects */}
+        {isPostImpl && !isEnhancement && (
+          <TabsContent value="enhancements" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Enhancement projects track new development work on this post-implementation project.
+                Each enhancement is a separate capitalizable asset under ASC 350-40.
+              </p>
+              <CreateEnhancementDialog parentProjectId={project.id} parentProjectName={project.name} />
+            </div>
+
+            {enhancements.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No enhancement projects yet.</p>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>#</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Phase</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {enhancements.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell>{e.enhancementNumber}</TableCell>
+                        <TableCell>
+                          <Link href={`/projects/${e.id}`} className="underline hover:text-foreground">
+                            {e.enhancementLabel || e.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell><PhaseBadge phase={e.phase} /></TableCell>
+                        <TableCell><StatusBadge status={e.status} /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

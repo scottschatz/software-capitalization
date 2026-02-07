@@ -17,7 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import { CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 
 interface Project {
   id: string
@@ -49,8 +49,12 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
   const router = useRouter()
   const isConfirmed = entry.status === 'confirmed'
 
-  // Parse AI description (split off confidence/reasoning)
-  const [aiSummary, aiMeta] = (entry.descriptionAuto ?? '').split('\n---\n')
+  // Parse AI description (split off confidence/reasoning and enhancement note)
+  const fullDesc = entry.descriptionAuto ?? ''
+  const [aiSummary, aiMeta] = fullDesc.split('\n---\n')
+  const isFlagged = entry.status === 'flagged'
+  const enhancementMatch = fullDesc.match(/⚠️ Enhancement Suggested: (.+)/)
+  const enhancementReason = enhancementMatch?.[1] ?? null
 
   const [hours, setHours] = useState(
     entry.hoursConfirmed ?? entry.hoursEstimated ?? 0
@@ -105,7 +109,7 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
   }
 
   return (
-    <Card className={isConfirmed ? 'border-green-200 bg-green-50/30' : ''}>
+    <Card className={isConfirmed ? 'border-green-200 bg-green-50/30' : isFlagged ? 'border-amber-300 bg-amber-50/30' : ''}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -124,6 +128,11 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
             {isConfirmed && (
               <Badge variant="default" className="text-xs">Confirmed</Badge>
             )}
+            {isFlagged && (
+              <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs">
+                <AlertTriangle className="h-3 w-3 mr-1" /> Flagged
+              </Badge>
+            )}
           </div>
           {entry.hoursEstimated != null && (
             <span className="text-sm text-muted-foreground">
@@ -132,6 +141,21 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
           )}
         </div>
       </CardHeader>
+
+      {isFlagged && enhancementReason && (
+        <div className="mx-6 mb-0 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-medium text-amber-800">Enhancement Detected</p>
+              <p className="text-amber-700 mt-1">{enhancementReason}</p>
+              <p className="text-amber-600 mt-2 text-xs">
+                Consider creating an Enhancement Project from the parent project page, or dismiss by confirming as-is.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

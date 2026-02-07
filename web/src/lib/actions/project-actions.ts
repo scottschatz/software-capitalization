@@ -4,6 +4,8 @@ import type {
   UpdateProjectInput,
   PhaseChangeRequestInput,
   PhaseChangeReviewInput,
+  DirectPhaseChangeInput,
+  CreateEnhancementInput,
   ListProjectsQuery,
 } from '@/lib/validations/project'
 import type { Prisma } from '@/generated/prisma/client'
@@ -67,7 +69,7 @@ export async function updateProject(
     include: { repos: true, claudePaths: true },
   })
 
-  const { repos, claudePaths, authorizationDate, expectedCompletion, ...scalarFields } = input
+  const { repos, claudePaths, authorizationDate, expectedCompletion, goLiveDate, ...scalarFields } = input
 
   // Build scalar update data and diff for history
   const updateData: Prisma.ProjectUpdateInput = {}
@@ -120,6 +122,18 @@ export async function updateProject(
       updateData.expectedCompletion = newDate
       historyEntries.push({
         field: 'expectedCompletion',
+        oldValue: oldDate?.toISOString() ?? null,
+        newValue: newDate?.toISOString() ?? null,
+      })
+    }
+  }
+  if (goLiveDate !== undefined) {
+    const newDate = goLiveDate ? new Date(goLiveDate) : null
+    const oldDate = existing.goLiveDate
+    if (newDate?.toISOString() !== oldDate?.toISOString()) {
+      updateData.goLiveDate = newDate
+      historyEntries.push({
+        field: 'goLiveDate',
         oldValue: oldDate?.toISOString() ?? null,
         newValue: newDate?.toISOString() ?? null,
       })
@@ -437,5 +451,191 @@ export async function rejectPhaseChange(
       requestedBy: { select: { displayName: true, email: true } },
       reviewedBy: { select: { displayName: true, email: true } },
     },
+  })
+}
+
+// ============================================================
+// DIRECT PHASE CHANGE (admin only, bypasses request workflow)
+// ============================================================
+
+export async function directPhaseChange(
+  projectId: string,
+  input: DirectPhaseChangeInput,
+  adminId: string,
+  adminEmail: string
+) {
+  if (adminEmail !== APPROVAL_EMAIL) {
+    throw new Error(`Only ${APPROVAL_EMAIL} can directly change project phases`)
+  }
+
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+  })
+
+  if (project.phase === input.newPhase) {
+    throw new Error(`Project is already in the "${input.newPhase}" phase`)
+  }
+
+  const effectiveDate = input.effectiveDate ? new Date(input.effectiveDate) : new Date()
+  // Auto-set goLiveDate when transitioning to post_implementation
+  const goLiveDate =
+    input.newPhase === 'post_implementation'
+      ? input.goLiveDate
+        ? new Date(input.goLiveDate)
+        : effectiveDate
+      : input.goLiveDate
+        ? new Date(input.goLiveDate)
+        : project.goLiveDate
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Update project phase + dates
+    const updated = await tx.project.update({
+      where: { id: projectId },
+      data: {
+        phase: input.newPhase,
+        phaseEffectiveDate: effectiveDate,
+        goLiveDate,
+      },
+      include: { repos: true, claudePaths: true },
+    })
+
+    // Create an auto-approved PhaseChangeRequest for audit trail
+    await tx.phaseChangeRequest.create({
+      data: {
+        projectId,
+        requestedById: adminId,
+        currentPhase: project.phase,
+        requestedPhase: input.newPhase,
+        reason: input.reason,
+        status: 'approved',
+        reviewedById: adminId,
+        reviewedAt: new Date(),
+        reviewNote: 'Direct admin phase change',
+      },
+    })
+
+    // Record in history
+    await tx.projectHistory.create({
+      data: {
+        projectId,
+        changedById: adminId,
+        field: 'phase',
+        oldValue: project.phase,
+        newValue: input.newPhase,
+      },
+    })
+
+    if (effectiveDate) {
+      await tx.projectHistory.create({
+        data: {
+          projectId,
+          changedById: adminId,
+          field: 'phaseEffectiveDate',
+          oldValue: project.phaseEffectiveDate?.toISOString() ?? null,
+          newValue: effectiveDate.toISOString(),
+        },
+      })
+    }
+
+    if (goLiveDate && goLiveDate.toISOString() !== project.goLiveDate?.toISOString()) {
+      await tx.projectHistory.create({
+        data: {
+          projectId,
+          changedById: adminId,
+          field: 'goLiveDate',
+          oldValue: project.goLiveDate?.toISOString() ?? null,
+          newValue: goLiveDate.toISOString(),
+        },
+      })
+    }
+
+    return updated
+  })
+
+  return result
+}
+
+// ============================================================
+// ENHANCEMENT PROJECTS
+// ============================================================
+
+export async function createEnhancementProject(
+  parentId: string,
+  input: CreateEnhancementInput,
+  developerId: string
+) {
+  const parent = await prisma.project.findUniqueOrThrow({
+    where: { id: parentId },
+    include: { repos: true, claudePaths: true },
+  })
+
+  if (parent.parentProjectId) {
+    throw new Error('Cannot create an enhancement of an enhancement project')
+  }
+
+  // Auto-compute enhancement number
+  const maxEnhancement = await prisma.project.aggregate({
+    where: { parentProjectId: parentId },
+    _max: { enhancementNumber: true },
+  })
+  const enhancementNumber = (maxEnhancement._max.enhancementNumber ?? 0) + 1
+
+  const name = `${parent.name} - ${input.enhancementLabel}`
+
+  const project = await prisma.$transaction(async (tx) => {
+    const created = await tx.project.create({
+      data: {
+        name,
+        description: input.description ?? `Enhancement of ${parent.name}: ${input.enhancementLabel}`,
+        businessJustification: parent.businessJustification,
+        phase: 'application_development',
+        managementAuthorized: parent.managementAuthorized,
+        probableToComplete: true,
+        developmentUncertainty: 'low',
+        status: 'active',
+        monitored: true,
+        parentProjectId: parentId,
+        enhancementLabel: input.enhancementLabel,
+        enhancementNumber,
+        phaseEffectiveDate: new Date(),
+        createdById: developerId,
+        repos: {
+          create: parent.repos.map((r) => ({
+            repoPath: r.repoPath,
+            repoUrl: r.repoUrl,
+          })),
+        },
+        claudePaths: {
+          create: parent.claudePaths.map((c) => ({
+            claudePath: c.claudePath,
+            localPath: c.localPath,
+          })),
+        },
+      },
+      include: { repos: true, claudePaths: true },
+    })
+
+    // Record creation in history
+    await tx.projectHistory.create({
+      data: {
+        projectId: created.id,
+        changedById: developerId,
+        field: '_created',
+        oldValue: null,
+        newValue: `Enhancement #${enhancementNumber} of ${parent.name}`,
+      },
+    })
+
+    return created
+  })
+
+  return project
+}
+
+export async function listEnhancementProjects(parentId: string) {
+  return prisma.project.findMany({
+    where: { parentProjectId: parentId },
+    include: { repos: true, claudePaths: true },
+    orderBy: { enhancementNumber: 'asc' },
   })
 }

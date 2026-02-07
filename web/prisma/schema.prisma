@@ -266,6 +266,15 @@ model Project {
   // active | paused | completed | abandoned
   expectedCompletion     DateTime? @map("expected_completion") @db.Date
 
+  // Project lifecycle dates
+  goLiveDate             DateTime? @map("go_live_date") @db.Date
+  phaseEffectiveDate     DateTime? @map("phase_effective_date") @db.Date
+
+  // Enhancement project support (self-referential)
+  parentProjectId        String?   @map("parent_project_id")
+  enhancementLabel       String?   @map("enhancement_label")
+  enhancementNumber      Int?      @map("enhancement_number")
+
   // Auto-discovery fields
   monitored              Boolean   @default(true)
   autoDiscovered         Boolean   @default(false) @map("auto_discovered")
@@ -275,6 +284,8 @@ model Project {
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
   createdBy          Developer           @relation(fields: [createdById], references: [id])
+  parentProject      Project?            @relation("ProjectEnhancements", fields: [parentProjectId], references: [id])
+  enhancementProjects Project[]          @relation("ProjectEnhancements")
   repos              ProjectRepo[]
   claudePaths        ProjectClaudePath[]
   history            ProjectHistory[]
@@ -283,6 +294,7 @@ model Project {
   manualEntries      ManualEntry[]
   monthlyReports     MonthlyReport[]
 
+  @@index([parentProjectId])
   @@map("projects")
 }
 

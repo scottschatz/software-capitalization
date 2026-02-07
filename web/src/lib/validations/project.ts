@@ -51,7 +51,8 @@ export const updateProjectSchema = z.object({
   developmentUncertainty: z.enum(UNCERTAINTY_LEVELS).optional(),
   status: z.enum(PROJECT_STATUSES).optional(),
   expectedCompletion: z.string().optional().nullable(),
-  // Phase is NOT updatable directly — must use phase change request
+  goLiveDate: z.string().optional().nullable(),
+  // Phase is NOT updatable directly — must use phase change request or admin direct change
   repos: z.array(repoSchema).optional(),
   claudePaths: z.array(claudePathSchema).optional(),
 })
@@ -74,6 +75,26 @@ export const phaseChangeReviewSchema = z.object({
 })
 
 export type PhaseChangeReviewInput = z.infer<typeof phaseChangeReviewSchema>
+
+// --- Direct Phase Change (admin only) ---
+
+export const directPhaseChangeSchema = z.object({
+  newPhase: z.enum(PROJECT_PHASES),
+  reason: z.string().min(1, 'A reason for the phase change is required'),
+  effectiveDate: z.string().optional().nullable(), // ISO date string, defaults to today
+  goLiveDate: z.string().optional().nullable(), // ISO date string, auto-set for post_implementation
+})
+
+export type DirectPhaseChangeInput = z.infer<typeof directPhaseChangeSchema>
+
+// --- Create Enhancement Project ---
+
+export const createEnhancementSchema = z.object({
+  enhancementLabel: z.string().min(1, 'Enhancement label is required').max(200),
+  description: z.string().optional().nullable(),
+})
+
+export type CreateEnhancementInput = z.infer<typeof createEnhancementSchema>
 
 // --- List Projects Query ---
 

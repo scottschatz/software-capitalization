@@ -8,6 +8,9 @@ export interface DailyActivityContext {
     name: string
     phase: string
     description: string | null
+    goLiveDate?: Date | null
+    parentProjectId?: string | null
+    enhancementLabel?: string | null
     repos: { repoPath: string }[]
     claudePaths: { claudePath: string; localPath: string }[]
   }>
@@ -56,6 +59,8 @@ export interface AIEntryResult {
   capitalizable: boolean
   confidence: number // 0-1
   reasoning: string
+  enhancementSuggested?: boolean  // true if post-impl project has new feature work
+  enhancementReason?: string      // why enhancement was suggested
 }
 
 /** Build a concise summary of real-time tool events from hooks. */
@@ -100,7 +105,9 @@ export function buildDailyEntryPrompt(ctx: DailyActivityContext): string {
   const projectList = ctx.projects.map((p) => {
     const repos = p.repos.map((r) => r.repoPath).join(', ')
     const paths = p.claudePaths.map((c) => `${c.claudePath} → ${c.localPath}`).join(', ')
-    return `- ${p.name} (ID: ${p.id}, phase: ${p.phase})${p.description ? `\n    Description: ${p.description}` : ''}\n    Repos: ${repos || 'none'}\n    Claude paths: ${paths || 'none'}`
+    const goLive = p.goLiveDate ? `\n    Go-live date: ${new Date(p.goLiveDate).toISOString().split('T')[0]}` : ''
+    const enhancement = p.parentProjectId ? `\n    Enhancement project (parent ID: ${p.parentProjectId})` : ''
+    return `- ${p.name} (ID: ${p.id}, phase: ${p.phase})${p.description ? `\n    Description: ${p.description}` : ''}${goLive}${enhancement}\n    Repos: ${repos || 'none'}\n    Claude paths: ${paths || 'none'}`
   }).join('\n')
 
   // Compute aggregate stats across all sessions
@@ -245,6 +252,10 @@ For each entry estimate:
 5. **Capitalizable**: true only if phase is "application_development".
 6. **Reasoning**: Cite the specific evidence: number of sessions used, total duration, number of user prompts, number of commits, and lines changed. Reference specific commit messages that informed your summary.
 
+7. **Enhancement detection**: If a project is in post_implementation phase (or has a go-live date) but the work looks like **significant new feature development** (not minor maintenance), check:
+   - If an enhancement project already exists for this parent project, assign the entry to the enhancement project instead.
+   - If NO enhancement project exists, set \`enhancementSuggested: true\` and explain in \`enhancementReason\` why the work looks like new development rather than maintenance (e.g., "New integrations and features being added to a post-implementation project — suggests an Enhancement Phase should be created").
+
 Respond with a JSON array of entries:
 \`\`\`json
 [
@@ -256,7 +267,9 @@ Respond with a JSON array of entries:
     "phase": "application_development",
     "capitalizable": true,
     "confidence": 0.85,
-    "reasoning": "Why this estimate"
+    "reasoning": "Why this estimate",
+    "enhancementSuggested": false,
+    "enhancementReason": null
   }
 ]
 \`\`\`
