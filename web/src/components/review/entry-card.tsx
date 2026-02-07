@@ -42,9 +42,10 @@ interface EntryCardProps {
     project: Project | null
   }
   projects: Project[]
+  onConfirmed?: (entryId: string) => void
 }
 
-export function EntryCard({ entry, projects }: EntryCardProps) {
+export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
   const router = useRouter()
   const isConfirmed = entry.status === 'confirmed'
 
@@ -99,6 +100,7 @@ export function EntryCard({ entry, projects }: EntryCardProps) {
 
     toast.success('Entry confirmed')
     setSubmitting(false)
+    onConfirmed?.(entry.id)
     router.refresh()
   }
 

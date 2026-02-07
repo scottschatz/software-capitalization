@@ -74,9 +74,9 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
     select: { id: true, email: true, displayName: true },
   })
 
-  // Get all active projects with repos and claude paths
+  // Get all monitored, non-abandoned projects with repos and claude paths
   const projects = await prisma.project.findMany({
-    where: { status: { not: 'abandoned' } },
+    where: { status: { not: 'abandoned' }, monitored: true },
     include: {
       repos: { select: { repoPath: true } },
       claudePaths: { select: { claudePath: true, localPath: true } },

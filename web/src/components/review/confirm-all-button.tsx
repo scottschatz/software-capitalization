@@ -9,9 +9,10 @@ import { CheckCircle } from 'lucide-react'
 interface ConfirmAllButtonProps {
   date: string
   pendingCount: number
+  onConfirmed?: (count: number) => void
 }
 
-export function ConfirmAllButton({ date, pendingCount }: ConfirmAllButtonProps) {
+export function ConfirmAllButton({ date, pendingCount, onConfirmed }: ConfirmAllButtonProps) {
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
 
@@ -34,6 +35,7 @@ export function ConfirmAllButton({ date, pendingCount }: ConfirmAllButtonProps) 
     const result = await res.json()
     toast.success(`${result.confirmed} entries confirmed`)
     setSubmitting(false)
+    onConfirmed?.(result.confirmed)
     router.refresh()
   }
 
