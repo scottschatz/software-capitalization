@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=npx tsx /home/sschatz/projects/software-capitalization/agent/src/cli.ts sync
+ExecStart=/usr/bin/npx tsx /home/sschatz/projects/software-capitalization/agent/src/cli.ts sync
 WorkingDirectory=/home/sschatz/projects/software-capitalization
 Environment=NODE_ENV=production
 StandardOutput=journal

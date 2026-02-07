@@ -10,7 +10,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- raw_sessions: immutable core fields, allow enrichment of enhanced Phase 5 fields
+-- raw_sessions: protect identity fields, allow metric updates
+-- Session JSONL files grow as conversations continue (context continuations append
+-- to the same file), so metrics (duration, messages, tokens) must be updatable.
+-- Only identity fields are truly immutable.
 CREATE OR REPLACE FUNCTION prevent_raw_session_modification()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -18,24 +21,14 @@ BEGIN
     RAISE EXCEPTION 'Immutability violation: DELETE on raw_sessions is not allowed.';
   END IF;
   IF TG_OP = 'UPDATE' THEN
-    -- Block changes to any core field; only enhanced fields may be updated
+    -- Block changes to identity fields only
     IF OLD.session_id IS DISTINCT FROM NEW.session_id
       OR OLD.developer_id IS DISTINCT FROM NEW.developer_id
       OR OLD.project_path IS DISTINCT FROM NEW.project_path
       OR OLD.started_at IS DISTINCT FROM NEW.started_at
-      OR OLD.ended_at IS DISTINCT FROM NEW.ended_at
-      OR OLD.duration_seconds IS DISTINCT FROM NEW.duration_seconds
-      OR OLD.total_input_tokens IS DISTINCT FROM NEW.total_input_tokens
-      OR OLD.total_output_tokens IS DISTINCT FROM NEW.total_output_tokens
-      OR OLD.total_cache_read_tokens IS DISTINCT FROM NEW.total_cache_read_tokens
-      OR OLD.total_cache_create_tokens IS DISTINCT FROM NEW.total_cache_create_tokens
-      OR OLD.message_count IS DISTINCT FROM NEW.message_count
-      OR OLD.tool_use_count IS DISTINCT FROM NEW.tool_use_count
-      OR OLD.model IS DISTINCT FROM NEW.model
-      OR OLD.raw_jsonl_path IS DISTINCT FROM NEW.raw_jsonl_path
       OR OLD.is_backfill IS DISTINCT FROM NEW.is_backfill
     THEN
-      RAISE EXCEPTION 'Immutability violation: Only enhanced fields (tool_breakdown, files_referenced, user_prompt_count, first_user_prompt) can be updated on raw_sessions.';
+      RAISE EXCEPTION 'Immutability violation: Identity fields (session_id, developer_id, project_path, started_at, is_backfill) cannot be changed on raw_sessions.';
     END IF;
   END IF;
   RETURN NEW;

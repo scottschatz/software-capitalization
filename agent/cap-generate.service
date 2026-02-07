@@ -1,0 +1,13 @@
+[Unit]
+Description=Cap Tracker - Generate AI daily entries for yesterday
+After=network.target cap-sync.service
+
+[Service]
+Type=oneshot
+# First sync to get latest data, then generate entries for yesterday
+ExecStartPre=/usr/bin/npx tsx /home/sschatz/projects/software-capitalization/agent/src/cli.ts sync
+ExecStart=/usr/bin/npx tsx /home/sschatz/projects/software-capitalization/agent/src/cli.ts generate
+WorkingDirectory=/home/sschatz/projects/software-capitalization
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal

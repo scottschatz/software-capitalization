@@ -132,6 +132,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
       filesReferenced: metrics.filesReferenced,
       userPromptCount: metrics.userPromptCount,
       firstUserPrompt: metrics.firstUserPrompt,
+      dailyBreakdown: metrics.dailyBreakdown,
     })
     parsed++
   }

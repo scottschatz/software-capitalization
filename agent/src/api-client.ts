@@ -31,6 +31,12 @@ export interface SyncSession {
   filesReferenced?: string[] | null
   userPromptCount?: number | null
   firstUserPrompt?: string | null
+  dailyBreakdown?: Array<{
+    date: string; firstTimestamp: string; lastTimestamp: string; activeMinutes: number; wallClockMinutes: number;
+    messageCount: number; toolUseCount: number; userPromptCount: number;
+    userPromptSamples: string[];
+    userPrompts: Array<{ time: string; text: string }>;
+  }> | null
 }
 
 export interface SyncCommit {

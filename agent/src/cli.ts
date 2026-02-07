@@ -98,6 +98,17 @@ mcp
   })
 
 program
+  .command('generate')
+  .description('Generate AI daily entries (calls server API)')
+  .option('--date <date>', 'Generate for a specific date (YYYY-MM-DD, default: yesterday)')
+  .option('--from <date>', 'Start date for batch generation (YYYY-MM-DD)')
+  .option('--to <date>', 'End date for batch generation (YYYY-MM-DD)')
+  .action(async (options) => {
+    const { generateCommand } = await import('./commands/generate.js')
+    await generateCommand(options)
+  })
+
+program
   .command('status')
   .description('Show agent status and last sync info')
   .action(async () => {

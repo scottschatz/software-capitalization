@@ -117,17 +117,51 @@ npx tsx agent/src/cli.ts mcp status
 npx tsx agent/src/cli.ts mcp uninstall
 ```
 
-### Step 6: Set Up Auto-Sync (Recommended)
+### Step 6: Set Up Auto-Sync & Entry Generation (Recommended)
 
-Run sync automatically so you don't have to remember:
+Run sync and entry generation automatically so you don't have to remember:
 
 ```bash
-# Linux (systemd user timer — syncs every 4 hours)
-bash agent/install-timer.sh
+# Copy timer/service files to systemd user directory
+mkdir -p ~/.config/systemd/user
+cp agent/cap-sync.timer agent/cap-sync.service \
+   agent/cap-generate.timer agent/cap-generate.service \
+   ~/.config/systemd/user/
 
-# Or add to crontab manually
+# Edit the service files to point to YOUR repo path
+# (default: /home/sschatz/projects/software-capitalization)
+# nano ~/.config/systemd/user/cap-sync.service
+# nano ~/.config/systemd/user/cap-generate.service
+
+# Enable and start timers
+systemctl --user daemon-reload
+systemctl --user enable --now cap-sync.timer cap-generate.timer
+
+# Verify timers are active
+systemctl --user list-timers
+```
+
+**What the timers do:**
+| Timer | Schedule | What It Does |
+|-------|----------|--------------|
+| `cap-sync.timer` | Mon-Fri 8am,10am,12pm,2pm,4pm,6pm | Syncs Claude sessions + git commits to server |
+| `cap-generate.timer` | Daily at 7:00 AM | Syncs first, then generates AI daily entries for yesterday |
+
+To check status or logs:
+```bash
+systemctl --user status cap-sync.timer
+systemctl --user status cap-generate.timer
+journalctl --user -u cap-sync.service --since today
+journalctl --user -u cap-generate.service --since today
+```
+
+**Alternative — crontab:**
+```bash
 crontab -e
-# Add: 0 */4 * * * cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync
+# Sync every 2 hours during business hours
+0 8,10,12,14,16,18 * * 1-5 cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync
+# Generate entries daily at 7 AM (syncs first, then generates)
+0 7 * * * cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync && npx tsx agent/src/cli.ts generate
 ```
 
 ## Daily Workflow
@@ -191,7 +225,7 @@ Set up systemd timers (or cron) for:
 
 | Source | What's Captured | How | Stored In |
 |--------|----------------|-----|-----------|
-| Claude Code JSONL | Session duration, tokens, tool breakdown, files, user prompts | `cap sync` (agent parses `~/.claude/projects/`) | `raw_sessions` |
+| Claude Code JSONL | Session duration, tokens, tool breakdown, files, timestamped user prompt transcript, gap-aware active time | `cap sync` (agent parses `~/.claude/projects/`) | `raw_sessions` |
 | Claude Code Hooks | Individual tool events with timestamps | Real-time POST from bash hooks | `raw_tool_events` |
 | Git repos | Commits, messages, insertions/deletions | `cap sync` (agent runs `git log`) | `raw_commits` |
 | AI (Claude Sonnet) | Grouped daily entries with hours/phase/summary | Server-side generation job | `daily_entries` |
@@ -204,12 +238,23 @@ Set up systemd timers (or cron) for:
 | **Session metadata** | Duration, tokens, messages, tool count | Session start/stop only |
 | **Tool breakdown** | Aggregate counts per session (Edit:117, Read:191...) | Individual events with timestamps |
 | **Files referenced** | Extracted from JSONL after the fact | Each file as it's touched, real-time |
-| **User prompts** | First 200 chars + count | Not captured |
+| **User prompts** | Full timestamped transcript (every human prompt with UTC time) | Not captured |
 | **Git commits** | Full git log parsing | Not captured |
 | **Timing granularity** | Session-level (start/end) | Tool-level (every Edit, Read, Bash...) |
 | **When it runs** | On-demand or cron (`cap sync`) | Automatic every tool invocation |
 
-The agent provides **richer context** for AI entry generation (user prompts, tool breakdowns, git commits). Hooks provide **finer timing granularity** for active-time calculation (individual tool timestamps vs session-level start/end). Together they give the most accurate picture of developer activity.
+The agent provides **richer context** for AI entry generation (timestamped user prompt transcripts, tool breakdowns, git commits). Hooks provide **finer timing granularity** for active-time calculation (individual tool timestamps vs session-level start/end). Together they give the most accurate picture of developer activity.
+
+### How Active Time Is Calculated
+
+The system computes **gap-aware active time** rather than simple wall-clock duration:
+
+1. All message timestamps in a session are sorted chronologically
+2. Consecutive intervals where the gap is **< 15 minutes** are summed as "active time"
+3. Gaps **>= 15 minutes** are treated as breaks/idle (excluded)
+4. The AI uses this active time as its primary guide, then applies a ~40% multiplier to estimate human-active hours (since the AI does most of the typing)
+
+**Example**: A session spanning 8:47 AM – 11:16 PM (14.5h wall clock) with a 9-hour lunch break and two work clusters would show ~4.3h active time, leading to an AI estimate of ~2-3h human development time.
 
 ## Key Commands
 
@@ -230,6 +275,9 @@ npx tsx agent/src/cli.ts init              # First-time setup
 npx tsx agent/src/cli.ts sync              # Sync sessions + commits
 npx tsx agent/src/cli.ts sync --dry-run    # Preview without sending
 npx tsx agent/src/cli.ts sync --reparse    # Re-extract enhanced data from all sessions
+npx tsx agent/src/cli.ts generate             # Generate AI entries for yesterday
+npx tsx agent/src/cli.ts generate --date 2026-02-06  # Generate for a specific date
+npx tsx agent/src/cli.ts generate --from 2026-01-01 --to 2026-01-31  # Batch generate
 npx tsx agent/src/cli.ts status            # Show config and last sync
 npx tsx agent/src/cli.ts hooks install     # Install real-time hooks
 npx tsx agent/src/cli.ts hooks status      # Check hook status

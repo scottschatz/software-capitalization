@@ -138,12 +138,14 @@ model RawSession {
   filesReferenced         String[]  @map("files_referenced")
   userPromptCount         Int?      @map("user_prompt_count")
   firstUserPrompt         String?   @map("first_user_prompt") @db.Text
+  dailyBreakdown          Json?     @map("daily_breakdown")  // per-day metrics: [{date, messageCount, toolUseCount, userPromptCount, userPromptSamples}]
 
   developer Developer     @relation(fields: [developerId], references: [id])
   syncLog   AgentSyncLog? @relation(fields: [syncLogId], references: [id])
 
   @@unique([developerId, sessionId])
   @@index([developerId, startedAt])
+  @@index([developerId, endedAt])
   @@index([projectPath])
   @@map("raw_sessions")
 }

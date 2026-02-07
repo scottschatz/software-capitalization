@@ -46,88 +46,69 @@ export async function POST(request: NextRequest) {
   try {
     for (const session of sessions) {
       try {
-        if (isReparse) {
-          // Reparse: upsert — create if new, update enhanced fields if exists
-          const existing = await prisma.rawSession.findUnique({
-            where: {
-              developerId_sessionId: {
-                developerId: developer.id,
-                sessionId: session.sessionId,
-              },
-            },
-            select: { id: true },
-          })
+        const sessionData = {
+          developerId: developer.id,
+          sessionId: session.sessionId,
+          projectPath: session.projectPath,
+          gitBranch: session.gitBranch ?? null,
+          claudeVersion: session.claudeVersion ?? null,
+          slug: session.slug ?? null,
+          startedAt: new Date(session.startedAt),
+          endedAt: session.endedAt ? new Date(session.endedAt) : null,
+          durationSeconds: session.durationSeconds ?? null,
+          totalInputTokens: session.totalInputTokens,
+          totalOutputTokens: session.totalOutputTokens,
+          totalCacheReadTokens: session.totalCacheReadTokens,
+          totalCacheCreateTokens: session.totalCacheCreateTokens,
+          messageCount: session.messageCount,
+          toolUseCount: session.toolUseCount,
+          model: session.model ?? null,
+          rawJsonlPath: session.rawJsonlPath ?? null,
+          isBackfill: session.isBackfill,
+          syncLogId: syncLog.id,
+          toolBreakdown: session.toolBreakdown ?? undefined,
+          filesReferenced: session.filesReferenced ?? [],
+          userPromptCount: session.userPromptCount ?? null,
+          firstUserPrompt: session.firstUserPrompt ?? null,
+          dailyBreakdown: session.dailyBreakdown ?? undefined,
+        }
 
-          if (existing) {
-            // Update only the enhanced fields (trigger allows this)
-            await prisma.rawSession.update({
-              where: { id: existing.id },
-              data: {
-                toolBreakdown: session.toolBreakdown ?? undefined,
-                filesReferenced: session.filesReferenced ?? [],
-                userPromptCount: session.userPromptCount ?? null,
-                firstUserPrompt: session.firstUserPrompt ?? null,
-              },
-            })
-            sessionsUpdated++
-          } else {
-            await prisma.rawSession.create({
-              data: {
-                developerId: developer.id,
-                sessionId: session.sessionId,
-                projectPath: session.projectPath,
-                gitBranch: session.gitBranch ?? null,
-                claudeVersion: session.claudeVersion ?? null,
-                slug: session.slug ?? null,
-                startedAt: new Date(session.startedAt),
-                endedAt: session.endedAt ? new Date(session.endedAt) : null,
-                durationSeconds: session.durationSeconds ?? null,
-                totalInputTokens: session.totalInputTokens,
-                totalOutputTokens: session.totalOutputTokens,
-                totalCacheReadTokens: session.totalCacheReadTokens,
-                totalCacheCreateTokens: session.totalCacheCreateTokens,
-                messageCount: session.messageCount,
-                toolUseCount: session.toolUseCount,
-                model: session.model ?? null,
-                rawJsonlPath: session.rawJsonlPath ?? null,
-                isBackfill: session.isBackfill,
-                syncLogId: syncLog.id,
-                toolBreakdown: session.toolBreakdown ?? undefined,
-                filesReferenced: session.filesReferenced ?? [],
-                userPromptCount: session.userPromptCount ?? null,
-                firstUserPrompt: session.firstUserPrompt ?? null,
-              },
-            })
-            sessionsCreated++
-          }
-        } else {
-          await prisma.rawSession.create({
-            data: {
+        // Always upsert: session files grow as conversations continue,
+        // so we need to update core metrics (duration, messages, tokens)
+        // on every sync, not just on first creation.
+        const existing = await prisma.rawSession.findUnique({
+          where: {
+            developerId_sessionId: {
               developerId: developer.id,
               sessionId: session.sessionId,
-              projectPath: session.projectPath,
-              gitBranch: session.gitBranch ?? null,
-              claudeVersion: session.claudeVersion ?? null,
-              slug: session.slug ?? null,
-              startedAt: new Date(session.startedAt),
-              endedAt: session.endedAt ? new Date(session.endedAt) : null,
-              durationSeconds: session.durationSeconds ?? null,
-              totalInputTokens: session.totalInputTokens,
-              totalOutputTokens: session.totalOutputTokens,
-              totalCacheReadTokens: session.totalCacheReadTokens,
-              totalCacheCreateTokens: session.totalCacheCreateTokens,
-              messageCount: session.messageCount,
-              toolUseCount: session.toolUseCount,
-              model: session.model ?? null,
-              rawJsonlPath: session.rawJsonlPath ?? null,
-              isBackfill: session.isBackfill,
-              syncLogId: syncLog.id,
-              toolBreakdown: session.toolBreakdown ?? undefined,
-              filesReferenced: session.filesReferenced ?? [],
-              userPromptCount: session.userPromptCount ?? null,
-              firstUserPrompt: session.firstUserPrompt ?? null,
+            },
+          },
+          select: { id: true },
+        })
+
+        if (existing) {
+          await prisma.rawSession.update({
+            where: { id: existing.id },
+            data: {
+              endedAt: sessionData.endedAt,
+              durationSeconds: sessionData.durationSeconds,
+              totalInputTokens: sessionData.totalInputTokens,
+              totalOutputTokens: sessionData.totalOutputTokens,
+              totalCacheReadTokens: sessionData.totalCacheReadTokens,
+              totalCacheCreateTokens: sessionData.totalCacheCreateTokens,
+              messageCount: sessionData.messageCount,
+              toolUseCount: sessionData.toolUseCount,
+              model: sessionData.model,
+              toolBreakdown: sessionData.toolBreakdown,
+              filesReferenced: sessionData.filesReferenced,
+              userPromptCount: sessionData.userPromptCount,
+              firstUserPrompt: sessionData.firstUserPrompt,
+              dailyBreakdown: sessionData.dailyBreakdown,
             },
           })
+          sessionsUpdated++
+        } else {
+          await prisma.rawSession.create({ data: sessionData })
           sessionsCreated++
         }
       } catch (err: unknown) {

@@ -23,6 +23,21 @@ export const syncSessionSchema = z.object({
   filesReferenced: z.array(z.string()).optional().nullable(),
   userPromptCount: z.number().int().optional().nullable(),
   firstUserPrompt: z.string().optional().nullable(),
+  dailyBreakdown: z.array(z.object({
+    date: z.string(),
+    firstTimestamp: z.string().optional().default(''),
+    lastTimestamp: z.string().optional().default(''),
+    activeMinutes: z.number().optional().default(0),
+    wallClockMinutes: z.number().optional().default(0),
+    messageCount: z.number().int(),
+    toolUseCount: z.number().int(),
+    userPromptCount: z.number().int(),
+    userPromptSamples: z.array(z.string()),
+    userPrompts: z.array(z.object({
+      time: z.string(),
+      text: z.string(),
+    })).optional().default([]),
+  })).optional().nullable(),
 })
 
 export const syncCommitSchema = z.object({
