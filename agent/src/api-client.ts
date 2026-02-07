@@ -1,7 +1,7 @@
 import type { AgentConfig } from './config.js'
 
 export interface SyncPayload {
-  syncType: 'incremental' | 'backfill'
+  syncType: 'incremental' | 'backfill' | 'reparse'
   sessions: SyncSession[]
   commits: SyncCommit[]
   fromDate?: string | null
@@ -26,6 +26,11 @@ export interface SyncSession {
   model?: string | null
   rawJsonlPath?: string | null
   isBackfill: boolean
+  // Enhanced fields (Phase 5)
+  toolBreakdown?: Record<string, number> | null
+  filesReferenced?: string[] | null
+  userPromptCount?: number | null
+  firstUserPrompt?: string | null
 }
 
 export interface SyncCommit {
@@ -45,6 +50,7 @@ export interface SyncCommit {
 export interface SyncResult {
   syncLogId: string
   sessionsCreated: number
+  sessionsUpdated?: number
   sessionsSkipped: number
   commitsCreated: number
   commitsSkipped: number
@@ -65,8 +71,28 @@ export interface ProjectDefinition {
   name: string
   phase: string
   status: string
+  monitored: boolean
   repos: { repoPath: string; repoUrl: string | null }[]
   claudePaths: { claudePath: string; localPath: string }[]
+}
+
+export interface DiscoverPayload {
+  projects: {
+    name: string
+    localPath: string
+    claudePath: string | null
+    repoPath: string | null
+    repoUrl: string | null
+    hasGit: boolean
+    hasClaude: boolean
+  }[]
+}
+
+export interface DiscoverResult {
+  created: number
+  updated: number
+  total: number
+  projects: ProjectDefinition[]
 }
 
 function headers(config: AgentConfig): Record<string, string> {
@@ -105,6 +131,19 @@ export async function postSync(config: AgentConfig, payload: SyncPayload): Promi
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Sync failed: ${res.status} ${res.statusText} — ${body}`)
+  }
+  return res.json()
+}
+
+export async function postDiscover(config: AgentConfig, payload: DiscoverPayload): Promise<DiscoverResult> {
+  const res = await fetch(`${config.serverUrl}/api/agent/discover`, {
+    method: 'POST',
+    headers: headers(config),
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Discover failed: ${res.status} ${res.statusText} — ${body}`)
   }
   return res.json()
 }

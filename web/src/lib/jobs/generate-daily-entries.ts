@@ -64,6 +64,10 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
         messageCount: true,
         toolUseCount: true,
         model: true,
+        toolBreakdown: true,
+        filesReferenced: true,
+        firstUserPrompt: true,
+        userPromptCount: true,
       },
     })
 
@@ -110,6 +114,10 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
         messageCount: s.messageCount,
         toolUseCount: s.toolUseCount,
         model: s.model,
+        toolBreakdown: s.toolBreakdown as Record<string, number> | null,
+        filesReferenced: s.filesReferenced,
+        firstUserPrompt: s.firstUserPrompt,
+        userPromptCount: s.userPromptCount,
       })),
       commits: commits.map((c) => ({
         commitHash: c.commitHash,

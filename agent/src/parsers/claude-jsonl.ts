@@ -15,6 +15,11 @@ export interface SessionMetrics {
   toolUseCount: number
   model: string | null
   rawJsonlPath: string
+  // Enhanced fields (Phase 5)
+  toolBreakdown: Record<string, number>  // e.g. { "Edit": 12, "Bash": 8 }
+  filesReferenced: string[]              // unique file paths from tool_use inputs
+  userPromptCount: number
+  firstUserPrompt: string | null         // first 200 chars of first user message
 }
 
 interface JsonlRecord {
@@ -53,6 +58,11 @@ export async function parseClaudeJsonl(filePath: string): Promise<SessionMetrics
   let sessionId: string | null = null
   let projectPath: string | null = null
   let recordCount = 0
+  // Enhanced fields
+  const toolBreakdown: Record<string, number> = {}
+  const filesReferencedSet = new Set<string>()
+  let userPromptCount = 0
+  let firstUserPrompt: string | null = null
 
   const rl = createInterface({
     input: createReadStream(filePath, { encoding: 'utf-8' }),
@@ -101,6 +111,15 @@ export async function parseClaudeJsonl(filePath: string): Promise<SessionMetrics
 
     if (record.type === 'user') {
       messageCount++
+      userPromptCount++
+      // Capture first user prompt (first 200 chars)
+      if (firstUserPrompt === null && record.message?.content) {
+        const content = record.message.content
+        const text = typeof content === 'string' ? content : ''
+        if (text) {
+          firstUserPrompt = text.slice(0, 200)
+        }
+      }
     }
 
     if (record.type === 'assistant') {
@@ -120,12 +139,33 @@ export async function parseClaudeJsonl(filePath: string): Promise<SessionMetrics
         totalCacheCreateTokens += usage.cache_creation_input_tokens ?? 0
       }
 
-      // Count tool_use blocks in content array
+      // Count tool_use blocks and extract tool breakdown + file paths
       const content = record.message?.content
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block && typeof block === 'object' && 'type' in block && block.type === 'tool_use') {
             toolUseCount++
+            // Track tool breakdown
+            const toolName = 'name' in block ? String(block.name) : 'unknown'
+            toolBreakdown[toolName] = (toolBreakdown[toolName] || 0) + 1
+            // Extract file paths from tool input
+            if ('input' in block && block.input && typeof block.input === 'object') {
+              const input = block.input as Record<string, unknown>
+              for (const key of ['file_path', 'path', 'notebook_path']) {
+                if (typeof input[key] === 'string' && input[key]) {
+                  filesReferencedSet.add(input[key] as string)
+                }
+              }
+              // Extract file path from command (basic heuristic for Bash)
+              if (typeof input.command === 'string') {
+                const cmdPaths = input.command.match(/(?:^|\s)(\/[\w./-]+\.\w+)/g)
+                if (cmdPaths) {
+                  for (const p of cmdPaths) {
+                    filesReferencedSet.add(p.trim())
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -159,5 +199,9 @@ export async function parseClaudeJsonl(filePath: string): Promise<SessionMetrics
     toolUseCount,
     model,
     rawJsonlPath: filePath,
+    toolBreakdown,
+    filesReferenced: [...filesReferencedSet],
+    userPromptCount,
+    firstUserPrompt,
   }
 }

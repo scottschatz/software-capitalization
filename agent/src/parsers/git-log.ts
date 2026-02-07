@@ -38,7 +38,10 @@ export function parseGitLog(
 
   if (options.since) args.push(`--since=${options.since}`)
   if (options.until) args.push(`--until=${options.until}`)
-  if (options.authorEmail) args.push(`--author=${options.authorEmail}`)
+  if (options.authorEmail) {
+    args.push(`--author=${options.authorEmail}`)
+    args.push('--regexp-ignore-case')
+  }
 
   let output: string
   try {

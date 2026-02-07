@@ -49,6 +49,32 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   }
 }
 
+// PATCH /api/projects/[id] — Toggle monitoring or other quick updates
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  const developer = await getDeveloper()
+  if (!developer) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { id } = await params
+  const body = await request.json()
+
+  if (typeof body.monitored === 'boolean') {
+    try {
+      const { prisma } = await import('@/lib/prisma')
+      const project = await prisma.project.update({
+        where: { id },
+        data: { monitored: body.monitored },
+      })
+      return NextResponse.json({ id: project.id, monitored: project.monitored })
+    } catch {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    }
+  }
+
+  return NextResponse.json({ error: 'No recognized fields to update' }, { status: 400 })
+}
+
 // DELETE /api/projects/[id] — Soft delete (sets status to 'abandoned')
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()

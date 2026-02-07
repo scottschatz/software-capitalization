@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { sessions, commits, syncType, fromDate, toDate } = parsed.data
+  const isReparse = syncType === 'reparse'
 
   // Create sync log
   const syncLog = await prisma.agentSyncLog.create({
@@ -38,39 +39,98 @@ export async function POST(request: NextRequest) {
 
   let sessionsCreated = 0
   let sessionsSkipped = 0
+  let sessionsUpdated = 0
   let commitsCreated = 0
   let commitsSkipped = 0
 
   try {
-    // Upsert sessions (skip duplicates via unique constraint)
     for (const session of sessions) {
       try {
-        await prisma.rawSession.create({
-          data: {
-            developerId: developer.id,
-            sessionId: session.sessionId,
-            projectPath: session.projectPath,
-            gitBranch: session.gitBranch ?? null,
-            claudeVersion: session.claudeVersion ?? null,
-            slug: session.slug ?? null,
-            startedAt: new Date(session.startedAt),
-            endedAt: session.endedAt ? new Date(session.endedAt) : null,
-            durationSeconds: session.durationSeconds ?? null,
-            totalInputTokens: session.totalInputTokens,
-            totalOutputTokens: session.totalOutputTokens,
-            totalCacheReadTokens: session.totalCacheReadTokens,
-            totalCacheCreateTokens: session.totalCacheCreateTokens,
-            messageCount: session.messageCount,
-            toolUseCount: session.toolUseCount,
-            model: session.model ?? null,
-            rawJsonlPath: session.rawJsonlPath ?? null,
-            isBackfill: session.isBackfill,
-            syncLogId: syncLog.id,
-          },
-        })
-        sessionsCreated++
+        if (isReparse) {
+          // Reparse: upsert — create if new, update enhanced fields if exists
+          const existing = await prisma.rawSession.findUnique({
+            where: {
+              developerId_sessionId: {
+                developerId: developer.id,
+                sessionId: session.sessionId,
+              },
+            },
+            select: { id: true },
+          })
+
+          if (existing) {
+            // Update only the enhanced fields (trigger allows this)
+            await prisma.rawSession.update({
+              where: { id: existing.id },
+              data: {
+                toolBreakdown: session.toolBreakdown ?? undefined,
+                filesReferenced: session.filesReferenced ?? [],
+                userPromptCount: session.userPromptCount ?? null,
+                firstUserPrompt: session.firstUserPrompt ?? null,
+              },
+            })
+            sessionsUpdated++
+          } else {
+            await prisma.rawSession.create({
+              data: {
+                developerId: developer.id,
+                sessionId: session.sessionId,
+                projectPath: session.projectPath,
+                gitBranch: session.gitBranch ?? null,
+                claudeVersion: session.claudeVersion ?? null,
+                slug: session.slug ?? null,
+                startedAt: new Date(session.startedAt),
+                endedAt: session.endedAt ? new Date(session.endedAt) : null,
+                durationSeconds: session.durationSeconds ?? null,
+                totalInputTokens: session.totalInputTokens,
+                totalOutputTokens: session.totalOutputTokens,
+                totalCacheReadTokens: session.totalCacheReadTokens,
+                totalCacheCreateTokens: session.totalCacheCreateTokens,
+                messageCount: session.messageCount,
+                toolUseCount: session.toolUseCount,
+                model: session.model ?? null,
+                rawJsonlPath: session.rawJsonlPath ?? null,
+                isBackfill: session.isBackfill,
+                syncLogId: syncLog.id,
+                toolBreakdown: session.toolBreakdown ?? undefined,
+                filesReferenced: session.filesReferenced ?? [],
+                userPromptCount: session.userPromptCount ?? null,
+                firstUserPrompt: session.firstUserPrompt ?? null,
+              },
+            })
+            sessionsCreated++
+          }
+        } else {
+          await prisma.rawSession.create({
+            data: {
+              developerId: developer.id,
+              sessionId: session.sessionId,
+              projectPath: session.projectPath,
+              gitBranch: session.gitBranch ?? null,
+              claudeVersion: session.claudeVersion ?? null,
+              slug: session.slug ?? null,
+              startedAt: new Date(session.startedAt),
+              endedAt: session.endedAt ? new Date(session.endedAt) : null,
+              durationSeconds: session.durationSeconds ?? null,
+              totalInputTokens: session.totalInputTokens,
+              totalOutputTokens: session.totalOutputTokens,
+              totalCacheReadTokens: session.totalCacheReadTokens,
+              totalCacheCreateTokens: session.totalCacheCreateTokens,
+              messageCount: session.messageCount,
+              toolUseCount: session.toolUseCount,
+              model: session.model ?? null,
+              rawJsonlPath: session.rawJsonlPath ?? null,
+              isBackfill: session.isBackfill,
+              syncLogId: syncLog.id,
+              toolBreakdown: session.toolBreakdown ?? undefined,
+              filesReferenced: session.filesReferenced ?? [],
+              userPromptCount: session.userPromptCount ?? null,
+              firstUserPrompt: session.firstUserPrompt ?? null,
+            },
+          })
+          sessionsCreated++
+        }
       } catch (err: unknown) {
-        // Skip duplicates (unique constraint on developerId + sessionId)
         if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
           sessionsSkipped++
         } else {
@@ -101,7 +161,6 @@ export async function POST(request: NextRequest) {
         })
         commitsCreated++
       } catch (err: unknown) {
-        // Skip duplicates (unique constraint on commitHash + repoPath)
         if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
           commitsSkipped++
         } else {
@@ -116,7 +175,7 @@ export async function POST(request: NextRequest) {
       data: {
         status: 'completed',
         completedAt: new Date(),
-        sessionsCount: sessionsCreated,
+        sessionsCount: sessionsCreated + sessionsUpdated,
         commitsCount: commitsCreated,
       },
     })
@@ -124,19 +183,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       syncLogId: syncLog.id,
       sessionsCreated,
+      sessionsUpdated,
       sessionsSkipped,
       commitsCreated,
       commitsSkipped,
     })
   } catch (err) {
-    // Mark sync failed
     await prisma.agentSyncLog.update({
       where: { id: syncLog.id },
       data: {
         status: 'failed',
         completedAt: new Date(),
         errorMessage: err instanceof Error ? err.message : 'Unknown error',
-        sessionsCount: sessionsCreated,
+        sessionsCount: sessionsCreated + sessionsUpdated,
         commitsCount: commitsCreated,
       },
     })

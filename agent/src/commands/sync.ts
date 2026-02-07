@@ -2,7 +2,8 @@ import { loadConfig, saveConfig } from '../config.js'
 import { scanClaudeProjects } from '../parsers/claude-scanner.js'
 import { parseClaudeJsonl } from '../parsers/claude-jsonl.js'
 import { parseGitLog } from '../parsers/git-log.js'
-import { fetchProjects, postSync } from '../api-client.js'
+import { discoverProjects } from '../parsers/env-scanner.js'
+import { fetchProjects, postSync, postDiscover } from '../api-client.js'
 import type { SyncPayload, SyncSession, SyncCommit } from '../api-client.js'
 
 interface SyncOptions {
@@ -10,33 +11,63 @@ interface SyncOptions {
   to?: string
   dryRun?: boolean
   verbose?: boolean
+  skipDiscover?: boolean
+  reparse?: boolean
 }
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
   const config = loadConfig()
   const isBackfill = !!options.from
-  const syncType = isBackfill ? 'backfill' : 'incremental'
+  const isReparse = !!options.reparse
+  const syncType: 'incremental' | 'backfill' | 'reparse' = isReparse ? 'reparse' : (isBackfill ? 'backfill' : 'incremental')
 
   console.log(`\n  Cap Agent Sync (${syncType})`)
   if (options.from) console.log(`  From: ${options.from}`)
   if (options.to) console.log(`  To: ${options.to}`)
+  if (options.reparse) console.log('  Mode: reparse (re-extracting enhanced fields from all JSONL files)')
   if (options.dryRun) console.log('  Mode: dry run')
   console.log()
+
+  // 0. Auto-discover projects
+  if (!options.skipDiscover) {
+    console.log('  Discovering projects...')
+    const discovered = discoverProjects(config.claudeDataDir)
+    if (discovered.length > 0 && !options.dryRun) {
+      try {
+        const discResult = await postDiscover(config, { projects: discovered })
+        if (discResult.created > 0) {
+          console.log(`  Auto-discovered ${discResult.created} new project(s)`)
+        }
+      } catch (err) {
+        if (options.verbose) {
+          console.log(`  Discovery warning: ${err instanceof Error ? err.message : err}`)
+        }
+        // Non-fatal — continue with sync
+      }
+    } else if (options.dryRun) {
+      console.log(`  Would discover ${discovered.length} project(s)`)
+    }
+  }
 
   // 1. Fetch project definitions from server
   console.log('  Fetching project definitions...')
   let projects
   try {
     projects = await fetchProjects(config)
-    console.log(`  Found ${projects.length} projects`)
+    const monitored = projects.filter((p) => p.monitored)
+    console.log(`  Found ${projects.length} projects (${monitored.length} monitored)`)
+    projects = monitored // Only sync monitored projects
   } catch (err) {
     console.error(`  Error: ${err instanceof Error ? err.message : err}`)
     return
   }
 
-  // 2. Determine since date
+  // 2. Determine since date (reparse ignores dates — scans everything)
   let sinceDate: Date | undefined
-  if (options.from) {
+  if (isReparse) {
+    // Reparse scans ALL files regardless of lastSync
+    sinceDate = undefined
+  } else if (options.from) {
     sinceDate = new Date(options.from)
   } else if (config.lastSync) {
     sinceDate = new Date(config.lastSync)
@@ -97,38 +128,45 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
       model: metrics.model,
       rawJsonlPath: metrics.rawJsonlPath,
       isBackfill: isBackfill,
+      toolBreakdown: metrics.toolBreakdown,
+      filesReferenced: metrics.filesReferenced,
+      userPromptCount: metrics.userPromptCount,
+      firstUserPrompt: metrics.firstUserPrompt,
     })
     parsed++
   }
 
   console.log(`  Parsed ${parsed} sessions (${skipped} skipped)`)
 
-  // 5. Collect git commits from project repos
-  console.log('  Scanning git repositories...')
+  // 5. Collect git commits from project repos (skip for reparse — only sessions)
   const commits: SyncCommit[] = []
 
-  for (const proj of projects) {
-    for (const repo of proj.repos) {
-      const gitCommits = parseGitLog(repo.repoPath, {
-        since: options.from ?? sinceDate?.toISOString(),
-        until: options.to,
-        authorEmail: config.developerEmail || undefined,
-      })
-
-      for (const gc of gitCommits) {
-        commits.push({
-          ...gc,
-          isBackfill: isBackfill,
+  if (isReparse) {
+    console.log('  Skipping git commits (reparse mode — sessions only)')
+  } else {
+    console.log('  Scanning git repositories...')
+    for (const proj of projects) {
+      for (const repo of proj.repos) {
+        const gitCommits = parseGitLog(repo.repoPath, {
+          since: options.from ?? sinceDate?.toISOString(),
+          until: options.to,
+          authorEmail: config.developerEmail || undefined,
         })
-      }
 
-      if (options.verbose && gitCommits.length > 0) {
-        console.log(`    ${repo.repoPath}: ${gitCommits.length} commits`)
+        for (const gc of gitCommits) {
+          commits.push({
+            ...gc,
+            isBackfill: isBackfill,
+          })
+        }
+
+        if (options.verbose && gitCommits.length > 0) {
+          console.log(`    ${repo.repoPath}: ${gitCommits.length} commits`)
+        }
       }
     }
+    console.log(`  Found ${commits.length} commits`)
   }
-
-  console.log(`  Found ${commits.length} commits`)
 
   // 6. Summary
   console.log('\n  Summary:')
@@ -168,7 +206,11 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   try {
     const result = await postSync(config, payload)
     console.log(`  Done!`)
-    console.log(`    Sessions: ${result.sessionsCreated} created, ${result.sessionsSkipped} skipped`)
+    if (result.sessionsUpdated) {
+      console.log(`    Sessions: ${result.sessionsCreated} created, ${result.sessionsUpdated} updated, ${result.sessionsSkipped} skipped`)
+    } else {
+      console.log(`    Sessions: ${result.sessionsCreated} created, ${result.sessionsSkipped} skipped`)
+    }
     console.log(`    Commits:  ${result.commitsCreated} created, ${result.commitsSkipped} skipped`)
 
     // Update lastSync in config

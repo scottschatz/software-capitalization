@@ -33,6 +33,7 @@ model Developer {
   rawSessions            RawSession[]
   rawCommits             RawCommit[]
   rawVscodeActivity      RawVscodeActivity[]
+  rawToolEvents          RawToolEvent[]
   agentSyncLogs          AgentSyncLog[]
   projectsCreated        Project[]
   dailyEntries           DailyEntry[]
@@ -132,6 +133,12 @@ model RawSession {
   syncLogId               String?   @map("sync_log_id")
   syncedAt                DateTime  @default(now()) @map("synced_at")
 
+  // Enhanced fields (Phase 5 — tool breakdown from JSONL parsing)
+  toolBreakdown           Json?     @map("tool_breakdown")
+  filesReferenced         String[]  @map("files_referenced")
+  userPromptCount         Int?      @map("user_prompt_count")
+  firstUserPrompt         String?   @map("first_user_prompt") @db.Text
+
   developer Developer     @relation(fields: [developerId], references: [id])
   syncLog   AgentSyncLog? @relation(fields: [syncLogId], references: [id])
 
@@ -186,6 +193,26 @@ model RawVscodeActivity {
   @@map("raw_vscode_activity")
 }
 
+model RawToolEvent {
+  id            String    @id @default(cuid())
+  developerId   String    @map("developer_id")
+  sessionId     String    @map("session_id")
+  projectPath   String?   @map("project_path")
+  toolName      String    @map("tool_name")
+  toolInput     Json?     @map("tool_input")
+  toolResponse  Json?     @map("tool_response")
+  durationMs    Int?      @map("duration_ms")
+  timestamp     DateTime  @default(now())
+  isBackfill    Boolean   @default(false) @map("is_backfill")
+
+  developer Developer @relation(fields: [developerId], references: [id])
+
+  @@index([developerId, timestamp])
+  @@index([sessionId])
+  @@index([toolName])
+  @@map("raw_tool_events")
+}
+
 model AgentSyncLog {
   id            String    @id @default(uuid())
   developerId   String    @map("developer_id")
@@ -236,6 +263,10 @@ model Project {
   status                 String    @default("active")
   // active | paused | completed | abandoned
   expectedCompletion     DateTime? @map("expected_completion") @db.Date
+
+  // Auto-discovery fields
+  monitored              Boolean   @default(true)
+  autoDiscovered         Boolean   @default(false) @map("auto_discovered")
 
   createdById            String    @map("created_by_id")
   createdAt              DateTime  @default(now()) @map("created_at")

@@ -65,6 +65,10 @@ describe('buildDailyEntryPrompt', () => {
           messageCount: 10,
           toolUseCount: 5,
           model: 'claude-sonnet-4-5-20250929',
+          toolBreakdown: null,
+          filesReferenced: [],
+          firstUserPrompt: null,
+          userPromptCount: null,
         },
       ],
     })

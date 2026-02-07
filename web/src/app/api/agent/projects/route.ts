@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
         name: true,
         phase: true,
         status: true,
+        monitored: true,
         repos: {
           select: {
             repoPath: true,

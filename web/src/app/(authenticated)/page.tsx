@@ -31,6 +31,8 @@ export default async function DashboardPage() {
     weeklyEntries,
     monthlyEntries,
     staleEntries,
+    weeklyPendingEntries,
+    monthlyPendingEntries,
   ] = await Promise.all([
     prisma.project.count({ where: { status: 'active' } }),
     prisma.dailyEntry.count({
@@ -65,29 +67,61 @@ export default async function DashboardPage() {
         createdAt: { lt: subDays(now, 2) },
       },
     }),
+    prisma.dailyEntry.findMany({
+      where: {
+        developerId: developer.id,
+        status: 'pending',
+        date: { gte: weekStart, lte: weekEnd },
+      },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: {
+        developerId: developer.id,
+        status: 'pending',
+        date: { gte: monthStart, lte: monthEnd },
+      },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
   ])
 
-  // Compute weekly stats
-  const weeklyHours = weeklyEntries.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
-  const weeklyCapHours = weeklyEntries
+  // Compute weekly stats (confirmed + pending estimates)
+  const weeklyConfirmedHours = weeklyEntries.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const weeklyConfirmedCapHours = weeklyEntries
     .filter((e) => e.phaseConfirmed === 'application_development')
     .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const weeklyPendingHours = weeklyPendingEntries.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const weeklyPendingCapHours = weeklyPendingEntries
+    .filter((e) => e.phaseAuto === 'application_development')
+    .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const weeklyHours = weeklyConfirmedHours + weeklyPendingHours
+  const weeklyCapHours = weeklyConfirmedCapHours + weeklyPendingCapHours
+  const hasWeeklyPending = weeklyPendingHours > 0
 
-  // Compute monthly stats by project
-  const monthlyByProject = new Map<string, { name: string; hours: number; capHours: number }>()
+  // Compute monthly stats by project (confirmed + pending estimates)
+  const monthlyByProject = new Map<string, { name: string; hours: number; capHours: number; pendingHours: number }>()
   for (const e of monthlyEntries) {
     const name = e.project?.name ?? 'Unmatched'
-    const existing = monthlyByProject.get(name) || { name, hours: 0, capHours: 0 }
+    const existing = monthlyByProject.get(name) || { name, hours: 0, capHours: 0, pendingHours: 0 }
     existing.hours += e.hoursConfirmed ?? 0
     if (e.phaseConfirmed === 'application_development') {
       existing.capHours += e.hoursConfirmed ?? 0
     }
     monthlyByProject.set(name, existing)
   }
-  const monthlyTotal = monthlyEntries.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
-  const monthlyCapTotal = monthlyEntries
-    .filter((e) => e.phaseConfirmed === 'application_development')
-    .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  for (const e of monthlyPendingEntries) {
+    const name = e.project?.name ?? 'Unmatched'
+    const existing = monthlyByProject.get(name) || { name, hours: 0, capHours: 0, pendingHours: 0 }
+    existing.hours += e.hoursEstimated ?? 0
+    existing.pendingHours += e.hoursEstimated ?? 0
+    if (e.phaseAuto === 'application_development') {
+      existing.capHours += e.hoursEstimated ?? 0
+    }
+    monthlyByProject.set(name, existing)
+  }
+  const monthlyTotal = [...monthlyByProject.values()].reduce((s, p) => s + p.hours, 0)
+  const monthlyCapTotal = [...monthlyByProject.values()].reduce((s, p) => s + p.capHours, 0)
+  const hasMonthlyPending = monthlyPendingEntries.length > 0
 
   return (
     <div className="space-y-6">
@@ -171,7 +205,12 @@ export default async function DashboardPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{weeklyHours.toFixed(1)}h</div>
+            <div className="text-2xl font-bold">
+              {weeklyHours.toFixed(1)}h
+              {hasWeeklyPending && (
+                <span className="text-sm font-normal text-muted-foreground ml-1">est.</span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               <span className="text-green-600 font-medium">{weeklyCapHours.toFixed(1)}h</span>{' '}
               capitalizable
@@ -185,7 +224,12 @@ export default async function DashboardPage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{monthlyTotal.toFixed(1)}h</div>
+            <div className="text-2xl font-bold">
+              {monthlyTotal.toFixed(1)}h
+              {hasMonthlyPending && (
+                <span className="text-sm font-normal text-muted-foreground ml-1">est.</span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               <span className="text-green-600 font-medium">{monthlyCapTotal.toFixed(1)}h</span>{' '}
               capitalizable
@@ -207,14 +251,17 @@ export default async function DashboardPage() {
               {[...monthlyByProject.values()]
                 .sort((a, b) => b.hours - a.hours)
                 .map((p) => {
-                  const pct = monthlyTotal > 0 ? (p.hours / monthlyTotal) * 100 : 0
                   const capPct = p.hours > 0 ? (p.capHours / p.hours) * 100 : 0
+                  const isPending = p.pendingHours > 0
                   return (
                     <div key={p.name} className="space-y-1">
                       <div className="flex justify-between text-sm">
                         <span className="font-medium">{p.name}</span>
                         <span>
                           {p.hours.toFixed(1)}h
+                          {isPending && (
+                            <span className="text-muted-foreground ml-1 text-xs">est.</span>
+                          )}
                           {p.capHours > 0 && (
                             <span className="text-green-600 ml-1">
                               ({p.capHours.toFixed(1)}h cap)
@@ -224,7 +271,7 @@ export default async function DashboardPage() {
                       </div>
                       <div className="h-2 bg-muted rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-green-500 rounded-full"
+                          className={`h-full rounded-full ${isPending ? 'bg-green-400/60' : 'bg-green-500'}`}
                           style={{ width: `${capPct}%` }}
                         />
                       </div>

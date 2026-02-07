@@ -12,7 +12,8 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { PhaseBadge, StatusBadge } from '@/components/projects/phase-badge'
-import { Plus, AlertCircle } from 'lucide-react'
+import { MonitoringToggle } from '@/components/projects/monitoring-toggle'
+import { Plus, AlertCircle, Scan } from 'lucide-react'
 
 export default async function ProjectsPage() {
   await requireDeveloper()
@@ -24,7 +25,7 @@ export default async function ProjectsPage() {
         <div>
           <h1 className="text-2xl font-bold">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            Manage software projects tracked for capitalization under ASC 350-40.
+            All projects in your environment. Toggle monitoring to include in capitalization tracking.
           </p>
         </div>
         <Link href="/projects/new">
@@ -36,9 +37,11 @@ export default async function ProjectsPage() {
 
       {projects.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
+          <Scan className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <h3 className="text-lg font-medium">No projects yet</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Create your first project to start tracking software capitalization hours.
+            Run <code className="bg-muted px-1 rounded">cap sync</code> from your machine
+            to auto-discover projects, or create one manually.
           </p>
           <Link href="/projects/new">
             <Button className="mt-4">
@@ -54,7 +57,8 @@ export default async function ProjectsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Phase</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Repos</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-center">Monitored</TableHead>
                 <TableHead className="text-right">Pending</TableHead>
               </TableRow>
             </TableHeader>
@@ -62,7 +66,7 @@ export default async function ProjectsPage() {
               {projects.map((project) => {
                 const pendingCount = project._count.phaseChangeRequests
                 return (
-                  <TableRow key={project.id}>
+                  <TableRow key={project.id} className={!project.monitored ? 'opacity-60' : undefined}>
                     <TableCell>
                       <Link
                         href={`/projects/${project.id}`}
@@ -82,8 +86,30 @@ export default async function ProjectsPage() {
                     <TableCell>
                       <StatusBadge status={project.status} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {project.repos.length}
+                    <TableCell>
+                      <div className="flex gap-1">
+                        {project.repos.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            {project.repos.length} repo{project.repos.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
+                        {project.claudePaths.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            claude
+                          </Badge>
+                        )}
+                        {project.autoDiscovered && (
+                          <Badge variant="secondary" className="text-xs">
+                            auto
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <MonitoringToggle
+                        projectId={project.id}
+                        initialMonitored={project.monitored}
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       {pendingCount > 0 && (

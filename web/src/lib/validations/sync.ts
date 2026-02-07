@@ -18,6 +18,11 @@ export const syncSessionSchema = z.object({
   model: z.string().optional().nullable(),
   rawJsonlPath: z.string().optional().nullable(),
   isBackfill: z.boolean().default(false),
+  // Enhanced fields (Phase 5)
+  toolBreakdown: z.record(z.string(), z.number()).optional().nullable(),
+  filesReferenced: z.array(z.string()).optional().nullable(),
+  userPromptCount: z.number().int().optional().nullable(),
+  firstUserPrompt: z.string().optional().nullable(),
 })
 
 export const syncCommitSchema = z.object({
@@ -35,7 +40,7 @@ export const syncCommitSchema = z.object({
 })
 
 export const syncPayloadSchema = z.object({
-  syncType: z.enum(['incremental', 'backfill']).default('incremental'),
+  syncType: z.enum(['incremental', 'backfill', 'reparse']).default('incremental'),
   sessions: z.array(syncSessionSchema).default([]),
   commits: z.array(syncCommitSchema).default([]),
   fromDate: z.string().optional().nullable(),
