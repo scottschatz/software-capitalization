@@ -1,12 +1,19 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { EntryCard } from '@/components/review/entry-card'
 import { ConfirmAllButton } from '@/components/review/confirm-all-button'
 import { ManualEntryDialog } from '@/components/review/manual-entry-dialog'
@@ -17,6 +24,8 @@ import {
   Clock,
   Calendar,
   Loader2,
+  ChevronsUpDown,
+  ChevronsDownUp,
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 
@@ -68,6 +77,12 @@ interface ReviewPageClientProps {
   manualEntries: SerializedManualEntry[]
   projects: Project[]
   showAll: boolean
+  availableMonths: string[]
+}
+
+function formatMonthLabel(monthStr: string): string {
+  const d = parseISO(monthStr + '-01')
+  return format(d, 'MMMM yyyy')
 }
 
 export function ReviewPageClient({
@@ -75,6 +90,7 @@ export function ReviewPageClient({
   manualEntries,
   projects,
   showAll: initialShowAll,
+  availableMonths,
 }: ReviewPageClientProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -82,6 +98,14 @@ export function ReviewPageClient({
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [confirmingAll, setConfirmingAll] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
+
+  // Determine active filter from URL
+  const currentMonth = searchParams.get('month') ?? ''
+  const currentDays = searchParams.get('days') ?? ''
+  // Unified range value: "month:2026-01", "7", "14", "30", or "all"
+  const currentRange = currentMonth
+    ? `month:${currentMonth}`
+    : currentDays || 'all'
 
   // Group entries by date
   const dayGroups = useMemo(() => {
@@ -143,7 +167,9 @@ export function ReviewPageClient({
   const totalConfirmed = dayGroups.reduce((sum, d) => sum + d.confirmedCount, 0)
   const totalHoursAll = dayGroups.reduce((sum, d) => sum + d.totalHours, 0)
   const totalCapHours = dayGroups.reduce((sum, d) => sum + d.capHours, 0)
+  const totalExpHours = totalHoursAll - totalCapHours
   const pendingDates = dayGroups.filter((d) => d.pendingCount > 0).map((d) => d.dateStr)
+  const allDates = dayGroups.map((d) => d.dateStr)
 
   function toggleDay(dateStr: string) {
     setExpandedDays((prev) => {
@@ -154,16 +180,51 @@ export function ReviewPageClient({
     })
   }
 
+  const expandAll = useCallback(() => {
+    setExpandedDays(new Set(allDates))
+  }, [allDates])
+
+  const collapseAll = useCallback(() => {
+    setExpandedDays(new Set())
+  }, [])
+
+  const allExpanded = expandedDays.size === dayGroups.length && dayGroups.length > 0
+  const noneExpanded = expandedDays.size === 0
+
+  function buildUrl(updates: { show?: string | null; days?: string | null; month?: string | null }) {
+    const p = new URLSearchParams(searchParams.toString())
+    if (updates.show !== undefined) {
+      if (updates.show) p.set('show', updates.show)
+      else p.delete('show')
+    }
+    if (updates.days !== undefined) {
+      if (updates.days) p.set('days', updates.days)
+      else p.delete('days')
+    }
+    if (updates.month !== undefined) {
+      if (updates.month) p.set('month', updates.month)
+      else p.delete('month')
+    }
+    const qs = p.toString()
+    return `/review${qs ? `?${qs}` : ''}`
+  }
+
   function handleToggleView(checked: boolean) {
     setShowAll(checked)
     setInitialLoad(true)
-    const params = new URLSearchParams(searchParams.toString())
-    if (checked) {
-      params.set('show', 'all')
+    router.push(buildUrl({ show: checked ? 'all' : null }))
+  }
+
+  function handleRangeChange(value: string) {
+    setInitialLoad(true)
+    if (value.startsWith('month:')) {
+      const month = value.slice(6)
+      router.push(buildUrl({ month, days: null }))
+    } else if (value === 'all') {
+      router.push(buildUrl({ days: null, month: null }))
     } else {
-      params.delete('show')
+      router.push(buildUrl({ days: value, month: null }))
     }
-    router.push(`/review?${params.toString()}`)
   }
 
   async function handleConfirmAllRange() {
@@ -187,6 +248,15 @@ export function ReviewPageClient({
     }
   }
 
+  // Build description of current filter for stats header
+  const filterLabel = !showAll
+    ? 'Pending entries'
+    : currentMonth
+      ? formatMonthLabel(currentMonth)
+      : currentDays
+        ? `Last ${currentDays} days`
+        : 'All time'
+
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
@@ -197,68 +267,131 @@ export function ReviewPageClient({
             Review and confirm your development hours for software capitalization.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="show-all" className="text-sm cursor-pointer">
-            Show confirmed
-          </Label>
-          <Switch
-            id="show-all"
-            checked={showAll}
-            onCheckedChange={handleToggleView}
-          />
+        <div className="flex items-center gap-4">
+          {showAll && (
+            <Select value={currentRange} onValueChange={handleRangeChange}>
+              <SelectTrigger className="w-[180px] h-8 text-xs">
+                <SelectValue placeholder="Date range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="3">Last 3 days</SelectItem>
+                <SelectItem value="7">Last 7 days</SelectItem>
+                <SelectItem value="14">Last 14 days</SelectItem>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="all">All time</SelectItem>
+                {availableMonths.length > 0 && (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground border-t mt-1 pt-1.5">
+                      By Month
+                    </div>
+                    {availableMonths.map((m) => (
+                      <SelectItem key={m} value={`month:${m}`}>
+                        {formatMonthLabel(m)}
+                      </SelectItem>
+                    ))}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+          )}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="show-all" className="text-sm cursor-pointer">
+              Show confirmed
+            </Label>
+            <Switch
+              id="show-all"
+              checked={showAll}
+              onCheckedChange={handleToggleView}
+            />
+          </div>
         </div>
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-2xl font-bold flex items-center justify-center gap-1">
-              <Calendar className="h-5 w-5 text-muted-foreground" />
-              {dayGroups.length}
-            </div>
-            <div className="text-xs text-muted-foreground">Days</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-2xl font-bold flex items-center justify-center gap-1">
-              <Clock className="h-5 w-5 text-muted-foreground" />
-              {totalHoursAll.toFixed(1)}h
-            </div>
-            <div className="text-xs text-muted-foreground">Total Hours</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-2xl font-bold text-green-600">{totalCapHours.toFixed(1)}h</div>
-            <div className="text-xs text-muted-foreground">Capitalizable</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-2xl font-bold text-amber-600">{totalPending}</div>
-            <div className="text-xs text-muted-foreground">Pending</div>
-          </CardContent>
-        </Card>
+      <div>
+        <div className="text-xs text-muted-foreground mb-2">{filterLabel}</div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Card>
+            <CardContent className="pt-4 pb-3 text-center">
+              <div className="text-2xl font-bold flex items-center justify-center gap-1">
+                <Calendar className="h-5 w-5 text-muted-foreground" />
+                {dayGroups.length}
+              </div>
+              <div className="text-xs text-muted-foreground">Days</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3 text-center">
+              <div className="text-2xl font-bold flex items-center justify-center gap-1">
+                <Clock className="h-5 w-5 text-muted-foreground" />
+                {totalHoursAll.toFixed(1)}h
+              </div>
+              <div className="text-xs text-muted-foreground">Total Hours</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3 text-center">
+              <div className="text-2xl font-bold text-green-600">{totalCapHours.toFixed(1)}h</div>
+              <div className="text-xs text-muted-foreground">Capitalizable</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3 text-center">
+              <div className="text-2xl font-bold text-muted-foreground">{totalExpHours.toFixed(1)}h</div>
+              <div className="text-xs text-muted-foreground">Expensed</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-3 text-center">
+              <div className="text-2xl font-bold text-amber-600">{totalPending}</div>
+              <div className="text-xs text-muted-foreground">Pending</div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {/* Global confirm all */}
-      {totalPending > 0 && (
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={handleConfirmAllRange}
-            disabled={confirmingAll}
-          >
-            {confirmingAll ? (
-              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-            ) : (
-              <CheckCircle className="h-4 w-4 mr-1" />
+      {/* Toolbar: confirm all + expand/collapse */}
+      {dayGroups.length > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            {totalPending > 0 && (
+              <Button
+                onClick={handleConfirmAllRange}
+                disabled={confirmingAll}
+              >
+                {confirmingAll ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 mr-1" />
+                )}
+                {confirmingAll
+                  ? 'Confirming...'
+                  : `Confirm All Pending (${totalPending})`}
+              </Button>
             )}
-            {confirmingAll
-              ? 'Confirming...'
-              : `Confirm All Pending (${totalPending} across ${pendingDates.length} days)`}
-          </Button>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={expandAll}
+              disabled={allExpanded}
+              className="text-xs"
+            >
+              <ChevronsUpDown className="h-3.5 w-3.5 mr-1" />
+              Expand All
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={collapseAll}
+              disabled={noneExpanded}
+              className="text-xs"
+            >
+              <ChevronsDownUp className="h-3.5 w-3.5 mr-1" />
+              Collapse All
+            </Button>
+          </div>
         </div>
       )}
 
@@ -321,17 +454,16 @@ export function ReviewPageClient({
                 {isExpanded && (
                   <div className="border-t px-4 py-4 space-y-4">
                     {/* Per-day actions */}
-                    {day.pendingCount > 0 && (
-                      <div className="flex items-center gap-2">
-                        <ConfirmAllButton date={day.dateStr} pendingCount={day.pendingCount} />
-                        <ManualEntryDialog date={day.dateStr} projects={projects} />
-                      </div>
-                    )}
-                    {day.pendingCount === 0 && (
-                      <div className="flex items-center gap-2">
-                        <ManualEntryDialog date={day.dateStr} projects={projects} />
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {day.pendingCount > 0 && (
+                        <ConfirmAllButton
+                          date={day.dateStr}
+                          pendingCount={day.pendingCount}
+                          onConfirmed={() => router.refresh()}
+                        />
+                      )}
+                      <ManualEntryDialog date={day.dateStr} projects={projects} />
+                    </div>
 
                     {/* Entry cards */}
                     {day.entries.map((entry) => (
@@ -339,6 +471,7 @@ export function ReviewPageClient({
                         key={entry.id}
                         entry={entry}
                         projects={projects}
+                        onConfirmed={() => router.refresh()}
                       />
                     ))}
 
