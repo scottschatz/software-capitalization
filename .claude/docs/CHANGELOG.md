@@ -2,6 +2,57 @@
 
 All notable changes documented here.
 
+## [0.5.0] - 2026-02-06
+
+### Added — Phase 5: Hybrid Integration
+- **Claude Code Hooks**: Real-time tool event capture via PostToolUse and Stop hooks
+- **MCP Server**: 6 tools for Claude-native data access (`get_my_hours`, `get_projects`, `get_pending_entries`, `confirm_entries`, `log_manual_time`, `get_activity_summary`)
+- **Enhanced JSONL Parser**: Extracts tool breakdown, files referenced, user prompt count, first user prompt from session logs
+- **Batch Entry Generation**: Admin endpoint `POST /api/agent/entries/generate-batch` for backfilling date ranges
+- **Active Time Calculation**: Tool event timestamp analysis for accurate active coding time (`web/src/lib/active-time.ts`)
+- **Project Auto-Discovery**: `cap discover` scans local repos and Claude paths, `POST /api/agent/discover`
+- **Monitoring Toggle**: Per-project monitoring on/off from project list UI
+- **Agent API Expansion**: 8 new endpoints — hooks (tool-event, session-event), entries (pending, confirm, manual, generate-batch), hours, activity
+- **Agent CLI Commands**: `cap hooks install/uninstall/status`, `cap mcp install/uninstall`, `cap discover`
+- **Hook Scripts**: Fire-and-forget bash scripts in `~/.cap-agent/hooks/` for zero-latency capture
+
+### Changed
+- **AI Prompts**: Smarter phase classification (application_development as default), AI-assisted hour estimation using session engagement metrics
+- **Dashboard**: Shows pending/estimated entries alongside confirmed data with visual distinction
+- **Sync Validation**: Extended to accept enhanced session fields (toolBreakdown, filesReferenced, userPromptCount, firstUserPrompt)
+- **Entry Generation Job**: Fetches and passes enhanced session fields to AI prompt
+- **README**: Rewritten with architecture diagram, data flow table, agent vs hooks comparison, comprehensive setup instructions
+- **Database Schema**: 22 models (added RawToolEvent), enhanced RawSession with 4 new columns
+
+---
+
+## [0.4.0] - 2026-02-05
+
+### Added — Phase 4: Hardening
+- **Vitest Test Framework**: 114 tests (91 web + 23 agent) covering parsers, validations, auth, AI prompts, active time
+- **Security Fixes**: Input validation, error handling, auth hardening
+- **Systemd Timer**: Cron jobs for entry generation (7 AM ET) and email sending (8 AM ET)
+- **Error Boundaries**: Authenticated layout error boundary (`web/src/app/(authenticated)/error.tsx`)
+
+---
+
+## [0.3.5] - 2026-02-05
+
+### Added — Phase 3.5: Team Management
+- **Admin API Routes**: `GET/PATCH /api/admin/developers`, role management
+- **Developer Management UI**: Team page with developer list, role assignment, activity status
+
+---
+
+## [0.3.0] - 2026-02-05
+
+### Added — Phase 3: Reporting
+- **Monthly Reports**: Capitalization reports with developer x project grid, capitalizable vs expensed totals
+- **Project Detail Report**: Daily breakdown with source data drill-down
+- **Unconfirmed Entries Report**: Cross-team pending entries with bulk reminder emails
+
+---
+
 ## [0.1.0] - 2026-02-05
 
 ### Added — Phase 1: Foundation

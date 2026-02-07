@@ -144,6 +144,87 @@ Use signed JWTs with 72-hour expiry embedded in GET URLs. Server verifies JWT an
 
 ---
 
+## Hooks + Agent Sync (Both Needed)
+- **Date**: 2026-02-06
+- **Status**: Accepted
+
+### Context
+Agent sync provides rich session summaries and git commit history but runs periodically (every 4 hours). Hooks can capture real-time tool events but lack broader context.
+
+### Decision
+Keep both systems. Agent provides session summaries, git commits, user prompts, and tool breakdowns from JSONL parsing. Hooks provide individual tool events with precise timestamps for active coding time calculation.
+
+### Alternatives
+1. **Hooks only**: Would miss git commits and session-level context
+2. **Agent only**: Would miss real-time tool-level granularity for active time calculation
+
+### Consequences
+- **Positive**: Best of both — rich context from agent, precise timing from hooks
+- **Negative**: Two data collection paths to maintain; data feeds different tables (`raw_sessions` vs `raw_tool_events`)
+
+---
+
+## MCP Server as API Proxy
+- **Date**: 2026-02-06
+- **Status**: Accepted
+
+### Context
+MCP server needed for Claude-native data access. Could access DB directly or proxy through the web API.
+
+### Decision
+MCP server calls web API endpoints using the developer's agent key. No direct database access from MCP.
+
+### Alternatives
+1. **Direct DB access**: Faster but duplicates auth/business logic
+2. **GraphQL layer**: Overkill for 6 tools
+
+### Consequences
+- **Positive**: Single source of truth for auth and business logic; MCP server stays thin
+- **Negative**: Extra network hop; MCP server needs `~/.cap-agent/config.json` with server URL and API key
+
+---
+
+## AI-Assisted Hour Estimation
+- **Date**: 2026-02-06
+- **Status**: Accepted
+
+### Context
+Claude Code does most of the actual coding. Traditional time tracking assumes human writes all code, but in AI-assisted development, the developer's role is directing and reviewing.
+
+### Decision
+AI prompt explicitly accounts for AI-assisted development. Uses user prompt count, tool breakdown, and session engagement metrics rather than commit volume. Active human time estimated at 50-70% of session duration.
+
+### Alternatives
+1. **Use session duration as-is**: Overestimates human effort significantly
+2. **Use commit/line count**: Even worse — AI generates most code
+3. **Manual time entry only**: Defeats the purpose of automation
+
+### Consequences
+- **Positive**: More accurate capitalization hours; conservative estimates reduce audit risk
+- **Negative**: Estimates are still imperfect; requires developer review/confirmation
+
+---
+
+## Application Development as Default Phase
+- **Date**: 2026-02-06
+- **Status**: Accepted
+
+### Context
+ASC 350-40 has three phases: preliminary (expensed), application_development (capitalized), post_implementation (expensed). Almost all developer coding work falls into application_development.
+
+### Decision
+AI defaults to `application_development` for all coding work. Only uses `preliminary` for pure research/evaluation with no code. Only uses `post_implementation` when project is explicitly released AND work is purely maintenance/bug fixes.
+
+### Alternatives
+1. **Strict classification based on work type**: Bug fixes during development classified differently — overly complex, doesn't match accounting practice
+2. **Always use project's current phase**: Ignores actual work being done
+
+### Consequences
+- **Positive**: Maximizes capitalizable hours (correct per ASC 350-40); reduces false post_implementation classification
+- **Negative**: Post-release feature work needs manual phase creation (future: automated enforcement)
+
+---
+
 ## When to Record
 
 Record decisions for:

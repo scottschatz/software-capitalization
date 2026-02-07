@@ -79,15 +79,17 @@ The sync command reads:
 - **Claude Code sessions** from `~/.claude/projects/` (JSONL files) — extracts session duration, tool usage, files touched, user prompts
 - **Git commits** from all monitored project repos — extracts commit messages, line counts, files changed
 
-### Step 4: Install Hooks (Recommended)
+### Step 4: Install Hooks (Optional)
 
-Hooks capture real-time tool events as you use Claude Code, giving more accurate time tracking.
+Hooks capture real-time tool events as you use Claude Code, giving per-tool timing data for more precise active-time calculations. **Hooks are not required** — the system works well with agent sync alone, which already captures session metadata, tool breakdowns, user prompts, and git commits. Hooks add finer timing granularity on top of that.
 
 ```bash
 npx tsx agent/src/cli.ts hooks install
 ```
 
 This registers hooks in `~/.claude/settings.json` that fire automatically every time Claude Code uses a tool (Edit, Read, Bash, etc.). The hooks are silent and add zero latency — they fire-and-forget a background HTTP request.
+
+**Important: VSCode users** — Hooks currently do not fire in VSCode's Native UI panel ([known issue](https://github.com/anthropics/claude-code/issues/8985)). If you use Claude Code via the terminal (either standalone or with `claudeCode.useTerminal: true` in VSCode settings), hooks work as expected. If you prefer the VSCode Native UI, skip this step — agent sync still captures everything needed for accurate time tracking.
 
 To check status or remove:
 ```bash

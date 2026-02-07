@@ -42,3 +42,4 @@ web/prisma/migrations/**/migration_lock.toml
 # Coverage
 coverage/
 *.tsbuildinfo
+.claude/settings.local.json

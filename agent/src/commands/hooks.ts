@@ -42,19 +42,27 @@ export async function hooksInstallCommand(): Promise<void> {
 
   const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>
 
-  // Add PostToolUse hook
-  const postToolUseEntry = {
-    type: 'command' as const,
-    command: join(HOOKS_DIR, 'post-tool-use.sh'),
+  // Add PostToolUse hook (new format: matcher group with nested hooks array)
+  const postToolUseGroup = {
+    hooks: [
+      {
+        type: 'command' as const,
+        command: join(HOOKS_DIR, 'post-tool-use.sh'),
+      },
+    ],
   }
-  hooks.PostToolUse = mergeHookEntry(hooks.PostToolUse as Record<string, unknown>[] | undefined, postToolUseEntry)
+  hooks.PostToolUse = mergeHookEntry(hooks.PostToolUse as Record<string, unknown>[] | undefined, postToolUseGroup)
 
   // Add Stop hook
-  const stopEntry = {
-    type: 'command' as const,
-    command: join(HOOKS_DIR, 'stop.sh'),
+  const stopGroup = {
+    hooks: [
+      {
+        type: 'command' as const,
+        command: join(HOOKS_DIR, 'stop.sh'),
+      },
+    ],
   }
-  hooks.Stop = mergeHookEntry(hooks.Stop as Record<string, unknown>[] | undefined, stopEntry)
+  hooks.Stop = mergeHookEntry(hooks.Stop as Record<string, unknown>[] | undefined, stopGroup)
 
   settings.hooks = hooks
 
@@ -91,9 +99,16 @@ export async function hooksUninstallCommand(): Promise<void> {
       if (hooks) {
         for (const event of ['PostToolUse', 'Stop']) {
           if (Array.isArray(hooks[event])) {
-            hooks[event] = (hooks[event] as Record<string, unknown>[]).filter(
-              (h) => typeof h.command !== 'string' || !h.command.includes('.cap-agent/hooks/')
-            )
+            hooks[event] = (hooks[event] as Record<string, unknown>[]).filter((h) => {
+              // Old flat format
+              if (typeof h.command === 'string' && h.command.includes('.cap-agent/hooks/')) return false
+              // New nested format
+              if (Array.isArray(h.hooks)) {
+                const innerHooks = h.hooks as Record<string, unknown>[]
+                if (innerHooks.some((ih) => typeof ih.command === 'string' && ih.command.includes('.cap-agent/hooks/'))) return false
+              }
+              return true
+            })
             if (hooks[event].length === 0) delete hooks[event]
           }
         }
@@ -132,16 +147,22 @@ export async function hooksStatusCommand(): Promise<void> {
       const settings = JSON.parse(readFileSync(CLAUDE_SETTINGS_PATH, 'utf-8'))
       const hooks = settings.hooks as Record<string, unknown[]> | undefined
       if (hooks) {
+        const hasCapAgentHook = (h: unknown): boolean => {
+          const hook = h as Record<string, unknown>
+          // Old flat format
+          if (typeof hook.command === 'string' && hook.command.includes('.cap-agent/hooks/')) return true
+          // New nested format
+          if (Array.isArray(hook.hooks)) {
+            return (hook.hooks as Record<string, unknown>[]).some(
+              (ih) => typeof ih.command === 'string' && ih.command.includes('.cap-agent/hooks/')
+            )
+          }
+          return false
+        }
         const hasPostToolUse = Array.isArray(hooks.PostToolUse) &&
-          hooks.PostToolUse.some((h: unknown) => {
-            const hook = h as Record<string, unknown>
-            return typeof hook.command === 'string' && hook.command.includes('.cap-agent/hooks/')
-          })
+          hooks.PostToolUse.some(hasCapAgentHook)
         const hasStop = Array.isArray(hooks.Stop) &&
-          hooks.Stop.some((h: unknown) => {
-            const hook = h as Record<string, unknown>
-            return typeof hook.command === 'string' && hook.command.includes('.cap-agent/hooks/')
-          })
+          hooks.Stop.some(hasCapAgentHook)
 
         console.log(`  ${hasPostToolUse ? '\u2713' : '\u2717'} PostToolUse hook in settings.json`)
         console.log(`  ${hasStop ? '\u2713' : '\u2717'} Stop hook in settings.json`)
@@ -176,10 +197,17 @@ function mergeHookEntry(
   entry: Record<string, unknown>
 ): Record<string, unknown>[] {
   const list = existing ?? []
-  // Remove any existing cap-agent hook entry
-  const filtered = list.filter(
-    (h) => typeof h.command !== 'string' || !h.command.includes('.cap-agent/hooks/')
-  )
+  // Remove any existing cap-agent hook entry (check both old flat format and new nested format)
+  const filtered = list.filter((h) => {
+    // Old flat format: { type, command }
+    if (typeof h.command === 'string' && h.command.includes('.cap-agent/hooks/')) return false
+    // New nested format: { hooks: [{ type, command }] }
+    if (Array.isArray(h.hooks)) {
+      const innerHooks = h.hooks as Record<string, unknown>[]
+      if (innerHooks.some((ih) => typeof ih.command === 'string' && ih.command.includes('.cap-agent/hooks/'))) return false
+    }
+    return true
+  })
   filtered.push(entry)
   return filtered
 }
@@ -194,21 +222,27 @@ INPUT=$(cat)
 SERVER="${serverUrl}"
 KEY="${apiKey}"
 
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-PROJECT_PATH=$(echo "$INPUT" | jq -r '.cwd // empty')
+# Parse JSON fields using python3 (jq not always available)
+read -r SESSION_ID TOOL_NAME PROJECT_PATH < <(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('session_id',''), d.get('tool_name',''), d.get('cwd',''))
+" 2>/dev/null)
 
 # Skip if missing required fields
 [ -z "$SESSION_ID" ] || [ -z "$TOOL_NAME" ] && exit 0
 
-# Sanitize input: keep file paths and short commands, strip content
-TOOL_INPUT=$(echo "$INPUT" | jq -c '{
-  file_path: (.tool_input.file_path // null),
-  path: (.tool_input.path // null),
-  command: ((.tool_input.command // "") | .[:500]),
-  pattern: (.tool_input.pattern // null),
-  description: ((.tool_input.description // "") | .[:200])
-} | with_entries(select(.value != null and .value != ""))')
+# Extract sanitized tool input using python3
+TOOL_INPUT=$(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('tool_input', {})
+out = {}
+for k in ('file_path', 'path', 'pattern', 'query'):
+    if d.get(k): out[k] = d[k]
+if d.get('command'): out['command'] = d['command'][:500]
+if d.get('description'): out['description'] = d['description'][:200]
+print(json.dumps(out))
+" 2>/dev/null || echo '{}')
 
 # Fire and forget
 curl -s -X POST "$SERVER/api/agent/hooks/tool-event" \\
@@ -231,12 +265,16 @@ INPUT=$(cat)
 SERVER="${serverUrl}"
 KEY="${apiKey}"
 
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+# Parse JSON fields using python3 (jq not always available)
+read -r SESSION_ID PROJECT_PATH < <(echo "$INPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('session_id',''), d.get('cwd',''))
+" 2>/dev/null)
 
 # Skip if missing session ID
 [ -z "$SESSION_ID" ] && exit 0
 
-PROJECT_PATH=$(echo "$INPUT" | jq -r '.cwd // empty')
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
 # Fire and forget
