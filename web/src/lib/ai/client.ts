@@ -76,6 +76,8 @@ async function callLocalModel(
   const timeout = setTimeout(() => controller.abort(), 180_000) // 3 min timeout
 
   try {
+    // Don't send response_format — many local model APIs (vLLM, Ollama) don't support
+    // json_object mode. We validate JSON output below and fall back to Haiku if invalid.
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -84,7 +86,6 @@ async function callLocalModel(
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
         max_tokens: maxTokens,
-        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
       }),
       signal: controller.signal,
     })
@@ -95,11 +96,14 @@ async function callLocalModel(
     }
 
     const data = await response.json()
-    const text = data.choices?.[0]?.message?.content ?? ''
+    let text = data.choices?.[0]?.message?.content ?? ''
 
     if (!text.trim()) {
       throw new Error('Empty response from local model')
     }
+
+    // Strip <think>...</think> blocks (Qwen3, DeepSeek-R1, etc.)
+    text = text.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim()
 
     // Validate that we got parseable JSON back (skip when not in JSON mode)
     if (jsonMode) {
