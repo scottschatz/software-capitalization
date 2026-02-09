@@ -60,31 +60,38 @@ function computeCommitQuality(commits: SourceCommit[]): number {
   return Math.min(score / maxScore, 1)
 }
 
+function computeHookQuality(hookEventCount: number): number {
+  if (hookEventCount === 0) return 0
+  // Scoring: more events = richer real-time data
+  if (hookEventCount >= 50) return 1.0
+  if (hookEventCount >= 20) return 0.7
+  if (hookEventCount >= 5) return 0.4
+  return 0.2
+}
+
+const COLOR_MAP: Record<string, { empty: string; low: string; mid: string; high: string }> = {
+  blue:    { empty: 'border border-blue-300/40',    low: 'bg-blue-300/50',    mid: 'bg-blue-500/70',    high: 'bg-blue-600' },
+  emerald: { empty: 'border border-emerald-300/40', low: 'bg-emerald-300/50', mid: 'bg-emerald-500/70', high: 'bg-emerald-600' },
+  violet:  { empty: 'border border-violet-300/40',  low: 'bg-violet-300/50',  mid: 'bg-violet-500/70',  high: 'bg-violet-600' },
+}
+
 function QualityDot({
   quality,
   color,
   tooltipContent,
 }: {
   quality: number
-  color: 'blue' | 'emerald'
+  color: 'blue' | 'emerald' | 'violet'
   tooltipContent: React.ReactNode
 }) {
-  const colorClasses =
-    color === 'blue'
-      ? quality === 0
-        ? 'border border-blue-300/40'
-        : quality <= 0.33
-          ? 'bg-blue-300/50'
-          : quality <= 0.66
-            ? 'bg-blue-500/70'
-            : 'bg-blue-600'
-      : quality === 0
-        ? 'border border-emerald-300/40'
-        : quality <= 0.33
-          ? 'bg-emerald-300/50'
-          : quality <= 0.66
-            ? 'bg-emerald-500/70'
-            : 'bg-emerald-600'
+  const c = COLOR_MAP[color]
+  const colorClasses = quality === 0
+    ? c.empty
+    : quality <= 0.33
+      ? c.low
+      : quality <= 0.66
+        ? c.mid
+        : c.high
 
   return (
     <Tooltip>
@@ -140,14 +147,17 @@ export function DataQualityIndicators({
   confidenceReasoning,
   sessions,
   commits,
+  hookEventCount = 0,
 }: {
   confidenceScore: number | null
   confidenceReasoning?: string | null
   sessions: SourceSession[]
   commits: SourceCommit[]
+  hookEventCount?: number
 }) {
   const sessionQuality = computeSessionQuality(sessions)
   const commitQuality = computeCommitQuality(commits)
+  const hookQuality = computeHookQuality(hookEventCount)
 
   const totalActiveMin = sessions.reduce((sum, s) => sum + (s.activeMinutes ?? 0), 0)
   const totalPrompts = sessions.reduce((sum, s) => sum + (s.userPromptCount ?? 0), 0)
@@ -188,6 +198,20 @@ export function DataQualityIndicators({
                 <p>Files changed: {totalFiles}</p>
                 <p>Insertions: {totalInsertions}</p>
               </div>
+            )}
+          </div>
+        }
+      />
+      <QualityDot
+        quality={hookQuality}
+        color="violet"
+        tooltipContent={
+          <div>
+            <p className="font-medium">Hooks: {hookEventCount} events</p>
+            {hookEventCount === 0 ? (
+              <p className="text-xs">No real-time hook data</p>
+            ) : (
+              <p className="text-xs">Real-time tool events from Claude Code</p>
             )}
           </div>
         }

@@ -26,7 +26,10 @@ export async function generateDailyEntries(
   }
 
   const prompt = buildDailyEntryPrompt(ctx, historicalStats)
-  const result = await completeWithFallback(prompt)
+  const result = await completeWithFallback(prompt, {
+    targetDate: ctx.date,
+    prompt: 'generation',
+  })
 
   const entries = parseAIResponse(result.text)
 

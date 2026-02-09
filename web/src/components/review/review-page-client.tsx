@@ -489,6 +489,9 @@ export function ReviewPageClient({
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium">{day.totalHours.toFixed(1)}h</span>
                     <span className="text-xs text-green-600">{day.capHours.toFixed(1)}h cap</span>
+                    {day.totalHours - day.capHours > 0 && (
+                      <span className="text-xs text-muted-foreground">{(day.totalHours - day.capHours).toFixed(1)}h exp</span>
+                    )}
                     {allConfirmed ? (
                       <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">
                         <CheckCircle className="h-3 w-3 mr-1" />

@@ -12,6 +12,7 @@ import {
   Users,
   BookOpen,
   ShieldCheck,
+  Activity,
 } from 'lucide-react'
 
 const navItems = [
@@ -29,6 +30,7 @@ const managerItems = [
 
 const adminItems = [
   { href: '/team', label: 'Team', icon: Users },
+  { href: '/settings/system-health', label: 'System Health', icon: Activity },
 ]
 
 interface SidebarProps {

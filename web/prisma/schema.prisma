@@ -592,6 +592,28 @@ model MonthlyExecutiveSummary {
 }
 
 // ============================================================
+// AI MODEL EVENTS (health monitoring)
+// ============================================================
+
+model ModelEvent {
+  id            String    @id @default(cuid())
+  timestamp     DateTime  @default(now())
+  eventType     String    @map("event_type")    // success | retry | fallback | error
+  modelAttempted String   @map("model_attempted") // model that was tried
+  modelUsed     String?   @map("model_used")      // model that actually succeeded (null on error)
+  targetDate    String?   @map("target_date")     // date being processed (YYYY-MM-DD)
+  errorMessage  String?   @map("error_message") @db.Text
+  attempt       Int?                              // retry attempt number (1, 2, 3)
+  latencyMs     Int?      @map("latency_ms")
+  prompt        String    @default("generation")  // generation | classification | executive_summary
+
+  @@index([timestamp])
+  @@index([eventType])
+  @@index([targetDate])
+  @@map("model_events")
+}
+
+// ============================================================
 // PERIOD LOCKS (SOX compliance — month-end close)
 // ============================================================
 

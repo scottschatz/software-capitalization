@@ -229,6 +229,7 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
               confidenceReasoning={aiMeta ?? null}
               sessions={sessions}
               commits={commits}
+              hookEventCount={totalHookEvents}
             />
             <ModelBadge model={entry.modelUsed} fallback={entry.modelFallback} />
             {entry.hoursEstimated != null && (

@@ -162,7 +162,7 @@ Context:
 
 Respond with ONLY a JSON object: {"workType": "category", "confidence": 0.0-1.0}`
 
-  const result = await completeWithFallback(prompt, { maxTokens: 128, jsonMode: true })
+  const result = await completeWithFallback(prompt, { maxTokens: 128, jsonMode: true, prompt: 'classification' })
 
   try {
     const jsonMatch = result.text.match(/\{[\s\S]*\}/)
