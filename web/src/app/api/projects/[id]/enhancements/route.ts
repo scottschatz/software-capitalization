@@ -17,11 +17,14 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   return NextResponse.json(enhancements)
 }
 
-// POST /api/projects/[id]/enhancements — Create enhancement project
+// POST /api/projects/[id]/enhancements — Create enhancement project (admin/manager only)
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!['admin', 'manager'].includes(developer.role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params

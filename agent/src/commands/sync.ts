@@ -3,8 +3,9 @@ import { scanClaudeProjects } from '../parsers/claude-scanner.js'
 import { parseClaudeJsonl } from '../parsers/claude-jsonl.js'
 import { parseGitLog } from '../parsers/git-log.js'
 import { discoverProjects } from '../parsers/env-scanner.js'
-import { fetchProjects, postSync, postDiscover } from '../api-client.js'
+import { fetchProjects, postSync, postDiscover, fetchAgentConfig } from '../api-client.js'
 import type { SyncPayload, SyncSession, SyncCommit } from '../api-client.js'
+import { updateTimers } from '../timer-updater.js'
 
 interface SyncOptions {
   from?: string
@@ -217,6 +218,20 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     // Update lastSync in config
     config.lastSync = new Date().toISOString()
     saveConfig(config)
+
+    // Pull remote config and update timers if schedule changed
+    const remoteConfig = await fetchAgentConfig(config)
+    if (remoteConfig && remoteConfig.configVersion !== config.lastConfigVersion) {
+      const timerUpdates = updateTimers(remoteConfig)
+      if (timerUpdates.length > 0) {
+        console.log('\n  Schedule updated from server:')
+        for (const u of timerUpdates) {
+          console.log(`    ${u.file}: ${u.detail}`)
+        }
+      }
+      config.lastConfigVersion = remoteConfig.configVersion
+      saveConfig(config)
+    }
   } catch (err) {
     console.error(`  Sync failed: ${err instanceof Error ? err.message : err}`)
     process.exitCode = 1

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyActionToken } from '@/lib/email/tokens'
 import { prisma } from '@/lib/prisma'
 import { escapeHtml } from '@/lib/email/templates'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 
 // Role-based approval: admin or manager role required (replaces hardcoded email check)
 
@@ -90,6 +91,20 @@ export async function POST(request: NextRequest) {
 
     if (payload.action === 'approve_all') {
       const dateObj = new Date(`${payload.date}T00:00:00.000Z`)
+
+      // Period lock check — prevent modifications to locked accounting periods
+      try {
+        await assertPeriodOpen(dateObj)
+      } catch (err) {
+        if (err instanceof PeriodLockedError) {
+          return new NextResponse(renderResult(err.message, false), {
+            headers: { 'Content-Type': 'text/html' },
+            status: 423,
+          })
+        }
+        throw err
+      }
+
       const entries = await prisma.dailyEntry.findMany({
         where: {
           developerId: payload.developerId,
@@ -101,15 +116,52 @@ export async function POST(request: NextRequest) {
 
       let confirmed = 0
       for (const entry of entries) {
+        const newStatus = 'confirmed'
+        const newPhase = entry.phaseAuto ?? entry.project?.phase ?? 'application_development'
+        const newDescription = entry.descriptionAuto?.split('\n---\n')[0] ?? 'Confirmed via email'
+        const newHours = entry.hoursEstimated
+
+        // Create revision records for field changes
+        const revisionCount = await prisma.dailyEntryRevision.count({
+          where: { entryId: entry.id },
+        })
+
+        let revNum = revisionCount
+        const comparisons: Array<{ field: string; oldVal: string | null; newVal: string }> = [
+          { field: 'status', oldVal: entry.status, newVal: newStatus },
+          { field: 'hoursConfirmed', oldVal: entry.hoursEstimated == null ? null : String(entry.hoursEstimated), newVal: String(newHours) },
+          { field: 'phaseConfirmed', oldVal: entry.phaseAuto, newVal: newPhase },
+          { field: 'descriptionConfirmed', oldVal: entry.descriptionAuto?.split('\n---\n')[0]?.trim() ?? null, newVal: newDescription },
+        ]
+
+        for (const { field, oldVal, newVal } of comparisons) {
+          if (String(oldVal ?? '') !== String(newVal)) {
+            revNum++
+            await prisma.dailyEntryRevision.create({
+              data: {
+                entryId: entry.id,
+                revision: revNum,
+                changedById: payload.developerId,
+                field,
+                oldValue: oldVal,
+                newValue: newVal,
+                reason: 'Email approval',
+                authMethod: 'email_reply',
+              },
+            })
+          }
+        }
+
         await prisma.dailyEntry.update({
           where: { id: entry.id },
           data: {
-            hoursConfirmed: entry.hoursEstimated,
-            phaseConfirmed: entry.phaseAuto ?? entry.project?.phase ?? 'application_development',
-            descriptionConfirmed: entry.descriptionAuto?.split('\n---\n')[0] ?? 'Confirmed via email',
+            hoursConfirmed: newHours,
+            phaseConfirmed: newPhase,
+            descriptionConfirmed: newDescription,
             confirmedAt: new Date(),
             confirmedById: payload.developerId,
-            status: 'confirmed',
+            confirmationMethod: 'email',
+            status: newStatus,
           },
         })
         confirmed++

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -18,20 +18,24 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { Slider } from '@/components/ui/slider'
-import { CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle, Cpu, Cloud, GitCommit, MessageSquare, Pencil, SlidersHorizontal } from 'lucide-react'
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle, Cpu, Cloud, GitCommit, MessageSquare, Pencil, SlidersHorizontal, ArrowRight, Loader2 } from 'lucide-react'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { DataQualityIndicators } from './data-quality-indicators'
-import type { SerializedEntry } from './review-page-client'
+import type { SerializedEntry, EnhancementProject } from './review-page-client'
 
 interface Project {
   id: string
   name: string
   phase: string
+  managementAuthorized?: boolean
+  probableToComplete?: boolean
+  authorizationDate?: string | null
 }
 
 interface EntryCardProps {
   entry: SerializedEntry
   projects: Project[]
+  enhancements?: EnhancementProject[]
   onConfirmed?: (entryId: string) => void
 }
 
@@ -76,7 +80,7 @@ function ModelBadge({ model, fallback }: { model: string | null; fallback: boole
   )
 }
 
-export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
+export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: EntryCardProps) {
   const router = useRouter()
   const isConfirmed = entry.status === 'confirmed'
 
@@ -102,6 +106,34 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
   const [manualHoursOverride, setManualHoursOverride] = useState(false)
   const [showSource, setShowSource] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [note, setNote] = useState(entry.developerNote ?? '')
+  const [noteSaving, setNoteSaving] = useState(false)
+  const noteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-save note with debounce (1s after last keystroke)
+  const saveNote = useCallback(async (value: string) => {
+    setNoteSaving(true)
+    try {
+      const res = await fetch(`/api/entries/${entry.id}/note`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ developerNote: value.trim() || null }),
+      })
+      if (!res.ok) {
+        toast.error('Failed to save note')
+      }
+    } catch {
+      toast.error('Failed to save note')
+    } finally {
+      setNoteSaving(false)
+    }
+  }, [entry.id])
+
+  function handleNoteChange(value: string) {
+    setNote(value)
+    if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
+    noteTimerRef.current = setTimeout(() => saveNote(value), 1000)
+  }
 
   // When factor changes, recalculate hours from raw
   function handleFactorChange(newFactor: number) {
@@ -113,6 +145,24 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
   }
 
   const capitalizable = phase === 'application_development'
+
+  // Date-aware authorization check for hint display
+  const proj = projects.find((p) => p.id === projectId)
+  const projAuthDate = proj?.authorizationDate ? new Date(proj.authorizationDate) : null
+  const authorizedAtDate = proj?.managementAuthorized === true
+    && (projAuthDate === null || projAuthDate <= new Date(entry.date))
+  const fullyAuthorized = authorizedAtDate && proj?.probableToComplete === true
+  // Authorization hint: what to show alongside the "Capitalizable" badge
+  const authHint = capitalizable && !fullyAuthorized
+    ? !proj?.managementAuthorized
+      ? 'pending authorization'
+      : projAuthDate && projAuthDate > new Date(entry.date)
+        ? 'before authorization date'
+        : !proj?.probableToComplete
+          ? 'completion not assessed'
+          : null
+    : null
+
   const hoursChanged =
     entry.hoursEstimated != null &&
     Math.abs(hours - entry.hoursEstimated) / entry.hoursEstimated > 0.2
@@ -150,6 +200,7 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
         projectId: projectId || undefined,
         adjustmentReason: adjustmentReason || null,
         adjustmentFactor: entryFactor,
+        developerNote: note.trim() || null,
       }),
     })
 
@@ -200,9 +251,14 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
               {entry.project?.name ?? 'Unmatched Project'}
             </span>
             {capitalizable ? (
-              <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">
-                <CheckCircle className="h-3 w-3 mr-1" /> Capitalizable
-              </Badge>
+              <>
+                <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">
+                  <CheckCircle className="h-3 w-3 mr-1" /> Capitalizable
+                </Badge>
+                {authHint && (
+                  <span className="text-[10px] text-amber-600">({authHint})</span>
+                )}
+              </>
             ) : (
               <Badge variant="outline" className="text-muted-foreground text-xs">
                 <XCircle className="h-3 w-3 mr-1" /> Expensed
@@ -258,18 +314,15 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
       </CardHeader>
 
       {isFlagged && enhancementReason && (
-        <div className="mx-6 mb-0 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-medium text-amber-800">Enhancement Detected</p>
-              <p className="text-amber-700 mt-1">{enhancementReason}</p>
-              <p className="text-amber-600 mt-2 text-xs">
-                Consider creating an Enhancement Project from the parent project page, or dismiss by confirming as-is.
-              </p>
-            </div>
-          </div>
-        </div>
+        <EnhancementReassignPanel
+          entryId={entry.id}
+          enhancementReason={enhancementReason}
+          enhancements={enhancements}
+          onReassigned={() => {
+            onConfirmed?.(entry.id)
+            router.refresh()
+          }}
+        />
       )}
 
       {isFlagged && entry.outlierFlag && (
@@ -393,6 +446,21 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
             disabled={isConfirmed}
+          />
+        </div>
+
+        {/* Developer note (optional, auto-saves) */}
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">
+            Note <span className="font-normal">(optional)</span>
+            {noteSaving && <span className="ml-1 text-[10px] text-blue-500">saving...</span>}
+          </Label>
+          <Input
+            value={note}
+            onChange={(e) => handleNoteChange(e.target.value)}
+            placeholder="Add a note about this work..."
+            maxLength={500}
+            className="text-sm h-8"
           />
         </div>
 
@@ -568,5 +636,96 @@ export function EntryCard({ entry, projects, onConfirmed }: EntryCardProps) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ============================================================
+// Enhancement Reassign Panel (shown on flagged post-impl entries)
+// ============================================================
+
+function EnhancementReassignPanel({
+  entryId,
+  enhancementReason,
+  enhancements,
+  onReassigned,
+}: {
+  entryId: string
+  enhancementReason: string
+  enhancements: EnhancementProject[]
+  onReassigned: () => void
+}) {
+  const [selectedEnhancement, setSelectedEnhancement] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleReassign() {
+    if (!selectedEnhancement) {
+      toast.error('Select an enhancement project first')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/entries/${entryId}/reassign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enhancementProjectId: selectedEnhancement }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error || 'Failed to reassign entry')
+        return
+      }
+      toast.success('Entry reassigned to enhancement project')
+      onReassigned()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mx-6 mb-0 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-amber-800">Enhancement Detected</p>
+          <p className="text-amber-700 mt-1">{enhancementReason}</p>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {enhancements.length > 0 ? (
+              <>
+                <Select value={selectedEnhancement} onValueChange={setSelectedEnhancement}>
+                  <SelectTrigger className="w-[240px] h-8 text-xs">
+                    <SelectValue placeholder="Move to Enhancement..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enhancements.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.enhancementLabel ?? e.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={!selectedEnhancement || submitting}
+                  onClick={handleReassign}
+                  className="h-8 text-xs"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-3 w-3 mr-1" />
+                  )}
+                  Move
+                </Button>
+              </>
+            ) : (
+              <p className="text-amber-600 text-xs">
+                No enhancement projects available. Create one from the parent project page, or confirm this entry as maintenance.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

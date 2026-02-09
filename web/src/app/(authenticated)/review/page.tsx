@@ -70,9 +70,34 @@ export default async function ReviewPage({
 
   const projects = await prisma.project.findMany({
     where: { status: { not: 'abandoned' } },
-    select: { id: true, name: true, phase: true },
+    select: {
+      id: true,
+      name: true,
+      phase: true,
+      parentProjectId: true,
+      managementAuthorized: true,
+      probableToComplete: true,
+      authorizationDate: true,
+      enhancementProjects: {
+        where: { status: { not: 'abandoned' } },
+        select: {
+          id: true,
+          name: true,
+          enhancementLabel: true,
+          enhancementNumber: true,
+          phase: true,
+        },
+        orderBy: { enhancementNumber: 'asc' },
+      },
+    },
     orderBy: { name: 'asc' },
   })
+
+  // Serialize authorizationDate for client component
+  const serializedProjects = projects.map((p) => ({
+    ...p,
+    authorizationDate: p.authorizationDate?.toISOString() ?? null,
+  }))
 
   // Find available months for the month picker (distinct months with data)
   const monthsRaw = await prisma.dailyEntry.findMany({
@@ -162,6 +187,7 @@ export default async function ReviewPage({
     workType: e.workType ?? null,
     confidenceScore: e.confidenceScore ?? null,
     outlierFlag: e.outlierFlag ?? null,
+    developerNote: e.developerNote ?? null,
     status: e.status,
     sourceSessionIds: e.sourceSessionIds,
     sourceCommitIds: e.sourceCommitIds,
@@ -218,7 +244,7 @@ export default async function ReviewPage({
     <ReviewPageClient
       entries={serializedEntries}
       manualEntries={serializedManual}
-      projects={projects}
+      projects={serializedProjects}
       showAll={showAll}
       availableMonths={availableMonths}
       adjustmentFactor={developer.adjustmentFactor}

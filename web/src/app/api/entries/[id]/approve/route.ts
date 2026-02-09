@@ -44,14 +44,33 @@ export async function PATCH(
     return NextResponse.json({ error: 'Cannot approve your own entries (segregation of duties)' }, { status: 403 })
   }
 
-  const updated = await prisma.dailyEntry.update({
-    where: { id },
-    data: {
-      approvedById: developer.id,
-      approvedAt: new Date(),
-      status: 'approved',
-    },
+  // Count existing revisions for sequential numbering
+  const revisionCount = await prisma.dailyEntryRevision.count({
+    where: { entryId: id },
   })
+
+  const [updated] = await prisma.$transaction([
+    prisma.dailyEntry.update({
+      where: { id },
+      data: {
+        approvedById: developer.id,
+        approvedAt: new Date(),
+        status: 'approved',
+      },
+    }),
+    prisma.dailyEntryRevision.create({
+      data: {
+        entryId: id,
+        revision: revisionCount + 1,
+        changedById: developer.id,
+        field: 'status',
+        oldValue: entry.status,
+        newValue: 'approved',
+        reason: null,
+        authMethod: 'web_session',
+      },
+    }),
+  ])
 
   return NextResponse.json(updated)
 }

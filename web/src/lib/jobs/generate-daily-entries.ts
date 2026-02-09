@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { generateDailyEntries } from '@/lib/ai/generate-entries'
 import { classifyWorkType, type ClassificationInput } from '@/lib/ai/classify-work-type'
 import { crossValidateEntry } from '@/lib/ai/cross-validate'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 import type { DailyActivityContext } from '@/lib/ai/prompts'
 import { subDays } from 'date-fns'
 
@@ -68,6 +69,17 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
   // which can shift the date when callers pass UTC-midnight dates (new Date('YYYY-MM-DD')).
   const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: DAY_TZ }).format(date)
   const { startOfDay, endOfDay } = getLocalDayBounds(dateStr)
+
+  // Check if the period is locked before generating any entries
+  try {
+    await assertPeriodOpen(startOfDay)
+  } catch (err) {
+    if (err instanceof PeriodLockedError) {
+      console.log('Skipping entry generation for locked period:', dateStr)
+      return { date: dateStr, developers: 0, entriesCreated: 0, errors: [] }
+    }
+    throw err
+  }
 
   const errors: string[] = []
   let entriesCreated = 0
@@ -405,6 +417,82 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
 
         // Phase comes from the project record, not the AI
         const projectPhase = matchingProject.phase
+
+        // Minimum activity threshold: even if a session path matches a project, check
+        // that the matched sessions had meaningful activity on THIS date. A session with
+        // < 3 messages and < 5 min active time on the target date is likely a brief
+        // directory open, not real work — flag instead of creating as pending.
+        const matchedSessionActivity = filteredSessions
+          .filter((s) => projectClaudePaths.includes(s.projectPath))
+          .reduce((acc, s) => {
+            const breakdown = s.dailyBreakdown as DailyBreakdownEntry[] | null
+            const dayData = breakdown?.find((d) => d.date === dateStr)
+            return {
+              messages: acc.messages + (dayData?.messageCount ?? s.messageCount ?? 0),
+              activeMinutes: acc.activeMinutes + (dayData?.activeMinutes ?? 0),
+            }
+          }, { messages: 0, activeMinutes: 0 })
+
+        const hasMinimalActivity = sourceSessionIds.length > 0
+          && sourceCommitIds.length === 0
+          && matchedSessionActivity.messages < 3
+          && matchedSessionActivity.activeMinutes < 5
+
+        // Zero-evidence guard: if the AI assigned a project but the actual session paths
+        // and commit repo paths don't match any registered paths for that project, the AI
+        // made a semantic guess that doesn't correspond to real project data. Flag it so
+        // the developer can reassign or dismiss rather than silently misattributing work.
+        if (sourceSessionIds.length === 0 && sourceCommitIds.length === 0) {
+          await prisma.dailyEntry.create({
+            data: {
+              developerId: developer.id,
+              date: startOfDay,
+              projectId: null, // Don't assign — evidence doesn't support it
+              hoursRaw: entry.hoursEstimate,
+              adjustmentFactor: adjFactor,
+              hoursEstimated: Math.round(entry.hoursEstimate * adjFactor * 100) / 100,
+              phaseAuto: null,
+              descriptionAuto: `⚠️ Unmatched Activity (AI suggested "${matchingProject.name}" but no matching source data found)\n\n${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}\n\nAction needed: Assign to the correct project or dismiss. The session/commit paths did not match any registered paths for "${matchingProject.name}".`,
+              confidenceScore: entry.confidence,
+              modelUsed,
+              modelFallback,
+              sourceSessionIds: [],
+              sourceCommitIds: [],
+              status: 'flagged',
+              workType: classification?.workType ?? null,
+              outlierFlag: validation?.flag ?? null,
+            },
+          })
+          entriesCreated++
+          continue
+        }
+
+        // Minimal activity guard: session path matched but barely any work happened
+        // on this date. Flag so the developer can verify or dismiss.
+        if (hasMinimalActivity) {
+          await prisma.dailyEntry.create({
+            data: {
+              developerId: developer.id,
+              date: startOfDay,
+              projectId: entry.projectId,
+              hoursRaw: entry.hoursEstimate,
+              adjustmentFactor: adjFactor,
+              hoursEstimated: Math.round(entry.hoursEstimate * adjFactor * 100) / 100,
+              phaseAuto: projectPhase,
+              descriptionAuto: `⚠️ Low Activity: Session path matched "${matchingProject.name}" but only ${matchedSessionActivity.messages} message(s) and ${Math.round(matchedSessionActivity.activeMinutes)} min active time on this date.\n\n${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}\n\nAction needed: Verify this work actually happened on this project, adjust hours, or dismiss.`,
+              confidenceScore: entry.confidence,
+              modelUsed,
+              modelFallback,
+              sourceSessionIds,
+              sourceCommitIds: [],
+              status: 'flagged',
+              workType: classification?.workType ?? null,
+              outlierFlag: 'low_activity',
+            },
+          })
+          entriesCreated++
+          continue
+        }
 
         // Enhancement detection: AI suggests new feature work on a post-impl project
         let status: string = 'pending'

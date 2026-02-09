@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDeveloper } from '@/lib/get-developer'
 import { prisma } from '@/lib/prisma'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 import { z } from 'zod'
 
 const bulkApproveSchema = z.object({
@@ -37,12 +38,12 @@ export async function PATCH(request: NextRequest) {
   // Fetch all entries in one query
   const entries = await prisma.dailyEntry.findMany({
     where: { id: { in: entryIds } },
-    select: { id: true, status: true, developerId: true },
+    select: { id: true, status: true, developerId: true, date: true },
   })
 
   const entryMap = new Map(entries.map((e) => [e.id, e]))
   const skipped: Array<{ id: string; reason: string }> = []
-  const toApprove: string[] = []
+  const toApprove: Array<{ id: string; status: string }> = []
 
   for (const entryId of entryIds) {
     const entry = entryMap.get(entryId)
@@ -58,22 +59,54 @@ export async function PATCH(request: NextRequest) {
       skipped.push({ id: entryId, reason: 'Cannot approve your own entries (segregation of duties)' })
       continue
     }
-    toApprove.push(entryId)
+
+    // Period lock check — skip entries in locked accounting periods
+    try {
+      await assertPeriodOpen(entry.date)
+    } catch (err) {
+      if (err instanceof PeriodLockedError) {
+        skipped.push({ id: entryId, reason: err.message })
+        continue
+      }
+      throw err
+    }
+
+    toApprove.push({ id: entryId, status: entry.status })
   }
 
-  // Approve all valid entries in a transaction
+  // Approve all valid entries in a transaction with revision records
   let approvedCount = 0
   if (toApprove.length > 0) {
     await prisma.$transaction(async (tx) => {
-      const result = await tx.dailyEntry.updateMany({
-        where: { id: { in: toApprove } },
-        data: {
-          approvedById: developer.id,
-          approvedAt: new Date(),
-          status: 'approved',
-        },
-      })
-      approvedCount = result.count
+      for (const entry of toApprove) {
+        const revisionCount = await tx.dailyEntryRevision.count({
+          where: { entryId: entry.id },
+        })
+
+        await tx.dailyEntry.update({
+          where: { id: entry.id },
+          data: {
+            approvedById: developer.id,
+            approvedAt: new Date(),
+            status: 'approved',
+          },
+        })
+
+        await tx.dailyEntryRevision.create({
+          data: {
+            entryId: entry.id,
+            revision: revisionCount + 1,
+            changedById: developer.id,
+            field: 'status',
+            oldValue: entry.status,
+            newValue: 'approved',
+            reason: null,
+            authMethod: 'web_session',
+          },
+        })
+
+        approvedCount++
+      }
     })
   }
 

@@ -1,8 +1,9 @@
 [Unit]
-Description=Run Cap Tracker sync every 2 hours during business hours
+Description=Run Cap Tracker sync during business hours + late evening
 
 [Timer]
-OnCalendar=Mon..Fri 08,10,12,14,16,18:00
+OnCalendar=Mon..Fri 08,10,12,14,16,18,23:00
+OnCalendar=Sat,Sun 12,23:00
 Persistent=true
 
 [Install]

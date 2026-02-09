@@ -101,6 +101,15 @@ export interface DiscoverResult {
   projects: ProjectDefinition[]
 }
 
+export interface AgentRemoteConfig {
+  configVersion: number
+  syncSchedule: {
+    weekday: string
+    weekend: string
+  }
+  generateSchedule: string
+}
+
 function headers(config: AgentConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${config.apiKey}`,
@@ -139,6 +148,18 @@ export async function postSync(config: AgentConfig, payload: SyncPayload): Promi
     throw new Error(`Sync failed: ${res.status} ${res.statusText} — ${body}`)
   }
   return res.json()
+}
+
+export async function fetchAgentConfig(config: AgentConfig): Promise<AgentRemoteConfig | null> {
+  try {
+    const res = await fetch(`${config.serverUrl}/api/agent/config`, {
+      headers: headers(config),
+    })
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null // Non-fatal — server may not support this endpoint yet
+  }
 }
 
 export async function postDiscover(config: AgentConfig, payload: DiscoverPayload): Promise<DiscoverResult> {

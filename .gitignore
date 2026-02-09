@@ -11,8 +11,9 @@ out/
 dist/
 build/
 
-# Environment
+# Environment (keep .env.example tracked)
 .env
+!.env.example
 .env.local
 .env.development.local
 .env.test.local

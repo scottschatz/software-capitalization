@@ -141,6 +141,7 @@ export default async function ReviewDatePage({
     workType: e.workType ?? null,
     confidenceScore: e.confidenceScore ?? null,
     outlierFlag: e.outlierFlag ?? null,
+    developerNote: e.developerNote ?? null,
     status: e.status,
     sourceSessionIds: e.sourceSessionIds,
     sourceCommitIds: e.sourceCommitIds,

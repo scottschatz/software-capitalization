@@ -13,6 +13,7 @@ export interface AgentConfig {
     apiUrl?: string
   }
   lastSync?: string
+  lastConfigVersion?: number
 }
 
 const CONFIG_DIR = join(homedir(), '.cap-agent')

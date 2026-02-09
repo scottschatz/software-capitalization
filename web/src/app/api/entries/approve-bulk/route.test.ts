@@ -16,6 +16,16 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+vi.mock('@/lib/period-lock', () => ({
+  assertPeriodOpen: vi.fn(),
+  PeriodLockedError: class PeriodLockedError extends Error {
+    constructor(message: string) {
+      super(message)
+      this.name = 'PeriodLockedError'
+    }
+  },
+}))
+
 import { PATCH } from './route'
 import { getDeveloper } from '@/lib/get-developer'
 import { prisma } from '@/lib/prisma'
@@ -112,14 +122,18 @@ describe('PATCH /api/entries/approve-bulk', () => {
     })
 
     mockPrisma.dailyEntry.findMany.mockResolvedValue([
-      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1' },
-      { id: 'entry-2', status: 'confirmed', developerId: 'dev-2' },
+      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1', date: new Date('2025-01-15') },
+      { id: 'entry-2', status: 'confirmed', developerId: 'dev-2', date: new Date('2025-01-15') },
     ])
 
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
       return fn({
         dailyEntry: {
-          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        dailyEntryRevision: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockResolvedValue({}),
         },
       })
     })
@@ -141,14 +155,18 @@ describe('PATCH /api/entries/approve-bulk', () => {
     })
 
     mockPrisma.dailyEntry.findMany.mockResolvedValue([
-      { id: 'entry-1', status: 'pending_approval', developerId: 'mgr-1' }, // own entry
-      { id: 'entry-2', status: 'pending_approval', developerId: 'dev-1' },
+      { id: 'entry-1', status: 'pending_approval', developerId: 'mgr-1', date: new Date('2025-01-15') }, // own entry
+      { id: 'entry-2', status: 'pending_approval', developerId: 'dev-1', date: new Date('2025-01-15') },
     ])
 
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
       return fn({
         dailyEntry: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        dailyEntryRevision: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockResolvedValue({}),
         },
       })
     })
@@ -172,15 +190,19 @@ describe('PATCH /api/entries/approve-bulk', () => {
     })
 
     mockPrisma.dailyEntry.findMany.mockResolvedValue([
-      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1' }, // valid
-      { id: 'entry-2', status: 'pending_approval', developerId: 'mgr-1' }, // own entry
-      { id: 'entry-3', status: 'pending', developerId: 'dev-2' }, // not approvable status
+      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1', date: new Date('2025-01-15') }, // valid
+      { id: 'entry-2', status: 'pending_approval', developerId: 'mgr-1', date: new Date('2025-01-15') }, // own entry
+      { id: 'entry-3', status: 'pending', developerId: 'dev-2', date: new Date('2025-01-15') }, // not approvable status
     ])
 
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
       return fn({
         dailyEntry: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        dailyEntryRevision: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockResolvedValue({}),
         },
       })
     })
@@ -209,13 +231,17 @@ describe('PATCH /api/entries/approve-bulk', () => {
     })
 
     mockPrisma.dailyEntry.findMany.mockResolvedValue([
-      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1' },
+      { id: 'entry-1', status: 'pending_approval', developerId: 'dev-1', date: new Date('2025-01-15') },
     ])
 
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
       return fn({
         dailyEntry: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+        dailyEntryRevision: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockResolvedValue({}),
         },
       })
     })

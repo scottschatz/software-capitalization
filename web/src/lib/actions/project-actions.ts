@@ -292,14 +292,20 @@ export async function listProjects(query: ListProjectsQuery = {}) {
     ]
   }
 
+  if (query.developerId) {
+    where.dailyEntries = { some: { developerId: query.developerId } }
+  }
+
   return prisma.project.findMany({
     where,
     include: {
       repos: true,
       claudePaths: true,
+      parentProject: { select: { id: true, name: true } },
       _count: {
         select: {
           phaseChangeRequests: { where: { status: 'pending' } },
+          enhancementProjects: true,
         },
       },
     },
@@ -416,6 +422,13 @@ export async function approvePhaseChange(
         newValue: request.requestedPhase,
       },
     })
+
+    // Reclassify pending entries when transitioning to post_implementation
+    if (request.requestedPhase === 'post_implementation') {
+      const project = await tx.project.findUniqueOrThrow({ where: { id: projectId } })
+      const effectiveDate = project.phaseEffectiveDate ?? new Date()
+      await reclassifyEntriesForPostImpl(tx, projectId, effectiveDate)
+    }
 
     return updated
   })
@@ -565,6 +578,11 @@ export async function directPhaseChange(
       })
     }
 
+    // Reclassify pending entries when transitioning to post_implementation
+    if (input.newPhase === 'post_implementation') {
+      await reclassifyEntriesForPostImpl(tx, projectId, effectiveDate)
+    }
+
     return updated
   })
 
@@ -654,4 +672,49 @@ export async function listEnhancementProjects(parentId: string) {
     include: { repos: true, claudePaths: true },
     orderBy: { enhancementNumber: 'asc' },
   })
+}
+
+// ============================================================
+// ENTRY RECLASSIFICATION ON POST-IMPLEMENTATION TRANSITION
+// ============================================================
+
+async function reclassifyEntriesForPostImpl(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  effectiveDate: Date
+) {
+  // Find unconfirmed entries after effective date that were classified as app_dev
+  const entriesToReclassify = await tx.dailyEntry.findMany({
+    where: {
+      projectId,
+      date: { gte: effectiveDate },
+      status: { in: ['pending', 'flagged'] },
+      phaseAuto: 'application_development',
+    },
+    select: { id: true, descriptionAuto: true },
+  })
+
+  if (entriesToReclassify.length === 0) return
+
+  // Bulk update: change phase to post_implementation and flag for review
+  await tx.dailyEntry.updateMany({
+    where: { id: { in: entriesToReclassify.map((e) => e.id) } },
+    data: {
+      phaseAuto: 'post_implementation',
+      status: 'flagged',
+    },
+  })
+
+  // Append enhancement suggestion note to each entry
+  const enhancementNote =
+    '\n⚠️ Enhancement Suggested: Project moved to post-implementation. This entry contained development work — consider moving to an Enhancement Project or confirm as maintenance.'
+
+  for (const entry of entriesToReclassify) {
+    if (!entry.descriptionAuto?.includes('Enhancement Suggested')) {
+      await tx.dailyEntry.update({
+        where: { id: entry.id },
+        data: { descriptionAuto: (entry.descriptionAuto ?? '') + enhancementNote },
+      })
+    }
+  }
 }

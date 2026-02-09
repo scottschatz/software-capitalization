@@ -46,36 +46,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'No pending entries for this date', confirmed: 0 })
     }
 
-    // Confirm each entry using its AI-suggested values
-    let confirmed = 0
-    for (const entry of entries) {
-      const newStatus = entry.project?.requiresManagerApproval ? 'pending_approval' : 'confirmed'
-      await prisma.dailyEntry.update({
-        where: { id: entry.id },
-        data: {
-          hoursConfirmed: entry.hoursEstimated,
-          phaseConfirmed: entry.phaseAuto ?? entry.project?.phase ?? 'application_development',
-          descriptionConfirmed: entry.descriptionAuto?.split('\n---\n')[0] ?? 'Confirmed as-is',
-          confirmedAt: new Date(),
-          confirmedById: developer.id,
-          confirmationMethod: 'bulk',
-          status: newStatus,
-        },
-      })
-      await prisma.dailyEntryRevision.create({
-        data: {
-          entryId: entry.id,
-          revision: 1,
-          changedById: developer.id,
-          field: 'status',
-          oldValue: 'pending',
-          newValue: newStatus,
-          reason: 'Accepted AI suggestion via bulk confirmation',
-          authMethod: 'web_session',
-        },
-      })
-      confirmed++
-    }
+    // Confirm each entry using its AI-suggested values (all-or-nothing transaction)
+    const confirmed = await prisma.$transaction(async (tx) => {
+      let count = 0
+      for (const entry of entries) {
+        const newStatus = entry.project?.requiresManagerApproval ? 'pending_approval' : 'confirmed'
+        await tx.dailyEntry.update({
+          where: { id: entry.id },
+          data: {
+            hoursConfirmed: entry.hoursEstimated,
+            phaseConfirmed: entry.phaseAuto ?? entry.project?.phase ?? 'application_development',
+            descriptionConfirmed: entry.descriptionAuto?.split('\n---\n')[0] ?? 'Confirmed as-is',
+            confirmedAt: new Date(),
+            confirmedById: developer.id,
+            confirmationMethod: 'bulk',
+            status: newStatus,
+          },
+        })
+        const revisionCount = await tx.dailyEntryRevision.count({
+          where: { entryId: entry.id },
+        })
+        await tx.dailyEntryRevision.create({
+          data: {
+            entryId: entry.id,
+            revision: revisionCount + 1,
+            changedById: developer.id,
+            field: 'status',
+            oldValue: 'pending',
+            newValue: newStatus,
+            reason: 'Accepted AI suggestion via bulk confirmation',
+            authMethod: 'web_session',
+          },
+        })
+        count++
+      }
+      return count
+    })
 
     return NextResponse.json({ confirmed })
   } catch (err) {

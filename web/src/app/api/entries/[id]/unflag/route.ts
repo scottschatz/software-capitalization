@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDeveloper } from '@/lib/get-developer'
 import { prisma } from '@/lib/prisma'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 
 export async function PATCH(
   request: NextRequest,
@@ -18,11 +19,21 @@ export async function PATCH(
 
   const entry = await prisma.dailyEntry.findUnique({
     where: { id },
-    select: { id: true, status: true, developerId: true },
+    select: { id: true, status: true, developerId: true, date: true },
   })
 
   if (!entry) {
     return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
+  }
+
+  // Period lock check — prevent modifications to locked accounting periods
+  try {
+    await assertPeriodOpen(entry.date)
+  } catch (err) {
+    if (err instanceof PeriodLockedError) {
+      return NextResponse.json({ error: err.message }, { status: 423 })
+    }
+    throw err
   }
 
   if (entry.status !== 'flagged') {

@@ -417,6 +417,7 @@ model DailyEntry {
   confirmedById        String?   @map("confirmed_by_id")
   adjustmentReason     String?   @map("adjustment_reason")
   confirmationMethod   String?   @map("confirmation_method") // individual | bulk | bulk_range | email_token
+  developerNote        String?   @map("developer_note") @db.Text  // optional free-text note from developer
 
   // Manager approval (segregation of duties)
   approvedById         String?   @map("approved_by_id")
@@ -611,6 +612,18 @@ model ModelEvent {
   @@index([eventType])
   @@index([targetDate])
   @@map("model_events")
+}
+
+// ============================================================
+// SYSTEM SETTINGS (server-managed config pushed to agents)
+// ============================================================
+
+model SystemSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
 }
 
 // ============================================================

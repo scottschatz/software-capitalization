@@ -10,11 +10,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const isManager = developer.role === 'admin' || developer.role === 'manager'
   const { searchParams } = request.nextUrl
   const query = listProjectsQuerySchema.safeParse({
     status: searchParams.get('status') || undefined,
     phase: searchParams.get('phase') || undefined,
     search: searchParams.get('search') || undefined,
+    // Role-based: developers see only projects they have entries against
+    developerId: !isManager ? developer.id : (searchParams.get('developerId') || undefined),
   })
 
   if (!query.success) {
@@ -33,11 +36,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/projects — Create a new project
+// POST /api/projects — Create a new project (admin/manager only)
 export async function POST(request: NextRequest) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!['admin', 'manager'].includes(developer.role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const body = await request.json()

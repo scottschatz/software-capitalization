@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateAgent } from '@/lib/agent-auth'
 import { prisma } from '@/lib/prisma'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 import { z } from 'zod'
 import { MANUAL_ENTRY_AUTO_APPROVE_THRESHOLD } from '@/lib/constants'
 
 const manualEntrySchema = z.object({
   projectName: z.string().min(1),
-  hours: z.number().positive(),
+  hours: z.number().positive().max(14, 'Hours must not exceed 14'),
   description: z.string().min(1),
   date: z.string().optional(), // YYYY-MM-DD, defaults to today
   phase: z.string().optional(), // defaults to project's current phase
@@ -56,6 +57,35 @@ export async function POST(request: NextRequest) {
   const date = data.date ? new Date(data.date) : new Date()
   // Normalize to date only (strip time)
   const dateOnly = new Date(date.toISOString().split('T')[0])
+
+  // Date validation: not in the future, not more than 1 year in the past
+  const now = new Date()
+  const todayOnly = new Date(now.toISOString().split('T')[0])
+  const oneYearAgo = new Date(todayOnly)
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+  if (dateOnly > todayOnly) {
+    return NextResponse.json(
+      { error: 'Date cannot be in the future' },
+      { status: 400 }
+    )
+  }
+  if (dateOnly < oneYearAgo) {
+    return NextResponse.json(
+      { error: 'Date cannot be more than 1 year in the past' },
+      { status: 400 }
+    )
+  }
+
+  // Period lock check — prevent modifications to locked accounting periods
+  try {
+    await assertPeriodOpen(dateOnly)
+  } catch (err) {
+    if (err instanceof PeriodLockedError) {
+      return NextResponse.json({ error: err.message }, { status: 423 })
+    }
+    throw err
+  }
 
   const status = data.hours <= MANUAL_ENTRY_AUTO_APPROVE_THRESHOLD ? 'confirmed' : 'pending_approval'
 

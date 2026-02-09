@@ -27,9 +27,15 @@ export async function GET(request: NextRequest) {
     const monthDate = parse(`${monthParam}-01`, 'yyyy-MM-dd', new Date())
     const startDate = format(startOfMonth(monthDate), 'yyyy-MM-dd')
     const endDate = format(endOfMonth(monthDate), 'yyyy-MM-dd')
-    const developerId = request.nextUrl.searchParams.get('developerId') ?? undefined
+    const requestedDevId = request.nextUrl.searchParams.get('developerId')
     const projectId = request.nextUrl.searchParams.get('projectId') ?? undefined
 
+    // Non-admin/manager developers can only view their own data
+    if (requestedDevId && requestedDevId !== developer.id && !['admin', 'manager'].includes(developer.role)) {
+      return NextResponse.json({ error: "Cannot view other developers' reports" }, { status: 403 })
+    }
+
+    const developerId = requestedDevId ?? undefined
     const filters = { startDate, endDate, developerId, projectId }
 
     const [dailyEntries, manualEntries, byProject, byDeveloper] = await Promise.all([

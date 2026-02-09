@@ -35,13 +35,28 @@ import {
   Loader2,
   ChevronsUpDown,
   ChevronsDownUp,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
+
+export interface EnhancementProject {
+  id: string
+  name: string
+  enhancementLabel: string | null
+  enhancementNumber: number | null
+  phase: string
+}
 
 interface Project {
   id: string
   name: string
   phase: string
+  parentProjectId?: string | null
+  managementAuthorized?: boolean
+  probableToComplete?: boolean
+  authorizationDate?: string | null
+  enhancementProjects?: EnhancementProject[]
 }
 
 interface SourceSession {
@@ -86,6 +101,7 @@ export interface SerializedEntry {
   workType: string | null
   confidenceScore: number | null
   outlierFlag: string | null
+  developerNote: string | null
   status: string
   sourceSessionIds: string[]
   sourceCommitIds: string[]
@@ -520,15 +536,48 @@ export function ReviewPageClient({
                       <ManualEntryDialog date={day.dateStr} projects={projects} />
                     </div>
 
+                    {/* Enhancement reassignment banner for flagged post-impl entries */}
+                    {(() => {
+                      const flaggedByProject = new Map<string, SerializedEntry[]>()
+                      for (const entry of day.entries) {
+                        if (entry.status === 'flagged' && entry.descriptionAuto?.includes('Enhancement Suggested') && entry.project) {
+                          const list = flaggedByProject.get(entry.project.id) ?? []
+                          list.push(entry)
+                          flaggedByProject.set(entry.project.id, list)
+                        }
+                      }
+                      return [...flaggedByProject.entries()].map(([projId, flaggedEntries]) => {
+                        const proj = flaggedEntries[0].project!
+                        const parentProject = projects.find((p) => p.id === projId)
+                        const enhancements = parentProject?.enhancementProjects?.filter((e) => e.phase === 'application_development') ?? []
+                        if (flaggedEntries.length < 2) return null
+                        return (
+                          <BulkReassignBanner
+                            key={`bulk-${projId}`}
+                            projectName={proj.name}
+                            entries={flaggedEntries}
+                            enhancements={enhancements}
+                            onReassigned={() => router.refresh()}
+                          />
+                        )
+                      })
+                    })()}
+
                     {/* Entry cards */}
-                    {day.entries.map((entry) => (
-                      <EntryCard
-                        key={entry.id}
-                        entry={entry}
-                        projects={projects}
-                        onConfirmed={() => router.refresh()}
-                      />
-                    ))}
+                    {day.entries.map((entry) => {
+                      // Find enhancement projects for this entry's parent project
+                      const parentProject = projects.find((p) => p.id === entry.project?.id)
+                      const enhancements = parentProject?.enhancementProjects?.filter((e) => e.phase === 'application_development') ?? []
+                      return (
+                        <EntryCard
+                          key={entry.id}
+                          entry={entry}
+                          projects={projects}
+                          enhancements={enhancements}
+                          onConfirmed={() => router.refresh()}
+                        />
+                      )
+                    })}
 
                     {/* Manual entries */}
                     {day.manualEntries.length > 0 && (
@@ -640,6 +689,105 @@ export function ReviewPageClient({
           </p>
         </div>
       </details>
+    </div>
+  )
+}
+
+// ============================================================
+// Bulk Reassignment Banner
+// ============================================================
+
+function BulkReassignBanner({
+  projectName,
+  entries,
+  enhancements,
+  onReassigned,
+}: {
+  projectName: string
+  entries: SerializedEntry[]
+  enhancements: EnhancementProject[]
+  onReassigned: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [selectedEnhancement, setSelectedEnhancement] = useState('')
+
+  async function handleBulkReassign() {
+    if (!selectedEnhancement) {
+      toast.error('Select an enhancement project first')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/entries/reassign-bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entryIds: entries.map((e) => e.id),
+          enhancementProjectId: selectedEnhancement,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error || 'Failed to reassign entries')
+        return
+      }
+      const result = await res.json()
+      toast.success(`${result.reassigned} entries reassigned to enhancement project`)
+      onReassigned()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="p-3 bg-amber-50 border border-amber-200 rounded-md">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-amber-800">
+            {entries.length} entries flagged for enhancement review
+          </p>
+          <p className="text-xs text-amber-700 mt-0.5">
+            Project &ldquo;{projectName}&rdquo; moved to post-implementation.
+          </p>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {enhancements.length > 0 ? (
+              <>
+                <Select value={selectedEnhancement} onValueChange={setSelectedEnhancement}>
+                  <SelectTrigger className="w-[260px] h-8 text-xs">
+                    <SelectValue placeholder="Select enhancement project..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enhancements.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.enhancementLabel ?? e.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={!selectedEnhancement || submitting}
+                  onClick={handleBulkReassign}
+                  className="h-8 text-xs"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-3 w-3 mr-1" />
+                  )}
+                  Reassign All ({entries.length})
+                </Button>
+              </>
+            ) : (
+              <p className="text-xs text-amber-600">
+                No enhancement projects available. Create one from the parent project page first.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

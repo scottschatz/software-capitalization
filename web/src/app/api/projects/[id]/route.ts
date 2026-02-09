@@ -22,11 +22,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// PUT /api/projects/[id] — Update non-phase fields
+// PUT /api/projects/[id] — Update non-phase fields (admin/manager only)
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!['admin', 'manager'].includes(developer.role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params
@@ -49,11 +52,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// PATCH /api/projects/[id] — Toggle monitoring or other quick updates
+// PATCH /api/projects/[id] — Toggle monitoring or other quick updates (admin/manager only)
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!['admin', 'manager'].includes(developer.role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params
@@ -75,11 +81,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   return NextResponse.json({ error: 'No recognized fields to update' }, { status: 400 })
 }
 
-// DELETE /api/projects/[id] — Soft delete (sets status to 'abandoned')
+// DELETE /api/projects/[id] — Soft delete (sets status to 'abandoned') (admin/manager only)
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!['admin', 'manager'].includes(developer.role)) {
+    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params

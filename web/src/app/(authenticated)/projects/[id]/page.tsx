@@ -20,7 +20,7 @@ import { PhaseChangeReview } from '@/components/projects/phase-change-review'
 import { CreateEnhancementDialog } from '@/components/projects/create-enhancement-dialog'
 import { ProjectNarrative } from '@/components/projects/project-narrative'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
-import { Pencil, GitBranch, FolderCode, AlertTriangle } from 'lucide-react'
+import { Pencil, GitBranch, FolderCode, AlertTriangle, Info } from 'lucide-react'
 import { format } from 'date-fns'
 
 const phaseLabels: Record<string, string> = {
@@ -63,15 +63,20 @@ export default async function ProjectDetailPage({
         </div>
       )}
 
-      {/* Authorization warning for capitalizable projects */}
+      {/* Authorization info for capitalizable projects */}
       {capitalizable && (!project.managementAuthorized || !project.probableToComplete) && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>
-            Hours on this project cannot be capitalized until management authorization is documented (ASU 2025-06).
-            {!project.managementAuthorized && ' Management authorization is not yet recorded.'}
-            {!project.probableToComplete && ' Probability of completion has not been assessed.'}
-          </span>
+        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <span>
+              {!project.managementAuthorized && 'Management authorization is not yet documented.'}
+              {!project.probableToComplete && ' Completion probability has not been assessed.'}
+              {' '}Reports will classify hours as expensed until these ASU 2025-06 requirements are recorded.
+            </span>
+            <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+              Developers can confirm entries normally &mdash; accounting makes the final capitalization determination using exported reports.
+            </p>
+          </div>
         </div>
       )}
 

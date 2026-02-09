@@ -74,9 +74,10 @@ interface UnconfirmedReport {
 
 export default function ReportsPage() {
   const { data: session } = useSession()
-  const developer = (session as unknown as Record<string, unknown>)?.developer as
-    | { displayName: string; email: string; role: string }
-    | undefined
+
+  // Safely extract developer info attached by the session callback
+  const sessionRecord = session as (typeof session & { developer?: { displayName: string; email: string; role: string } }) | null
+  const developer = sessionRecord?.developer
   const userRole = developer?.role
 
   const [month, setMonth] = useState(format(subMonths(new Date(), 1), 'yyyy-MM'))

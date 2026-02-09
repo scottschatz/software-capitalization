@@ -73,7 +73,7 @@ export async function queryDailyEntries(filters: ReportFilters): Promise<DailyEn
     include: {
       developer: { select: { displayName: true, email: true } },
       confirmedBy: { select: { displayName: true } },
-      project: { select: { name: true, phase: true, managementAuthorized: true, probableToComplete: true, status: true, requiresManagerApproval: true } },
+      project: { select: { name: true, phase: true, managementAuthorized: true, probableToComplete: true, authorizationDate: true, status: true, requiresManagerApproval: true } },
       _count: { select: { revisions: true } },
     },
     orderBy: [{ date: 'asc' }, { developer: { displayName: 'asc' } }],
@@ -83,7 +83,10 @@ export async function queryDailyEntries(filters: ReportFilters): Promise<DailyEn
     const phaseIsCapitalizable = e.phaseConfirmed === 'application_development' ||
       (!e.phaseConfirmed && e.project?.phase === 'application_development')
     // ASU 2025-06: project must be authorized and probable to complete
-    const projectAuthorized = e.project?.managementAuthorized === true && e.project?.probableToComplete === true
+    // Date-aware: authorization only applies from authorizationDate onward
+    const authorizedAtDate = e.project?.managementAuthorized === true
+      && (e.project.authorizationDate === null || e.project.authorizationDate <= e.date)
+    const projectAuthorized = authorizedAtDate && e.project?.probableToComplete === true
     const projectActive = e.project?.status !== 'abandoned' && e.project?.status !== 'suspended'
 
     return {
@@ -135,14 +138,17 @@ export async function queryManualEntries(filters: ReportFilters): Promise<Manual
     where,
     include: {
       developer: { select: { displayName: true, email: true } },
-      project: { select: { name: true, managementAuthorized: true, probableToComplete: true, status: true } },
+      project: { select: { name: true, managementAuthorized: true, probableToComplete: true, authorizationDate: true, status: true } },
       approvedBy: { select: { displayName: true } },
     },
     orderBy: [{ date: 'asc' }, { developer: { displayName: 'asc' } }],
   })
 
   return entries.map((e) => {
-    const projectAuthorized = e.project.managementAuthorized === true && e.project.probableToComplete === true
+    // Date-aware: authorization only applies from authorizationDate onward
+    const authorizedAtDate = e.project.managementAuthorized === true
+      && (e.project.authorizationDate === null || e.project.authorizationDate <= e.date)
+    const projectAuthorized = authorizedAtDate && e.project.probableToComplete === true
     const projectActive = e.project.status !== 'abandoned' && e.project.status !== 'suspended'
     return {
       id: e.id,

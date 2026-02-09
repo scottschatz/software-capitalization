@@ -2,6 +2,27 @@
 
 Automated tracking of developer time for ASC 350-40 software capitalization. Collects data from Claude Code sessions and git repos, AI categorizes work by project and phase, developers confirm via daily review.
 
+---
+
+## Quick Start — Let Claude Set It Up
+
+Already have Claude Code? Paste this into your terminal:
+
+```bash
+git clone https://github.com/scottschatz/software-capitalization.git
+cd software-capitalization
+```
+
+Then open Claude Code and say:
+
+> Set me up as a developer for this project. I need the agent configured, hooks installed, MCP server installed, and systemd timers set up. My server URL is `https://<server-url>` and my API key is `cap_<paste-key-here>`. My email is `<your-email>@townsquaremedia.com`.
+
+Claude will read this README and the project's CLAUDE.md and handle everything — `npm install`, agent init, hooks, MCP, and timers.
+
+**Don't have an API key yet?** Log into the web UI at your server URL with your Townsquare Azure AD account, go to **Settings**, click **Generate API Key**, and copy the `cap_` key.
+
+---
+
 ## How It Works
 
 ```
@@ -33,15 +54,71 @@ Developer's Machine                          Server (web/)
 
 ## Developer Setup
 
-Every developer on the team needs to do these steps once:
+Every developer on the team needs to do these steps once.
 
-### Step 1: Get an API Key
+**Prerequisites:** Node.js 20+, Git, a Linux/WSL machine (for systemd timers), and a Townsquare Azure AD account.
+
+### Copy-Paste Setup (All-in-One)
+
+If you already have your API key, paste this entire block and fill in the three values:
+
+```bash
+# ── Fill these in ──
+SERVER_URL="https://<server-url>"
+API_KEY="cap_<paste-key-here>"
+EMAIL="your.name@townsquaremedia.com"
+
+# ── Clone & install ──
+git clone https://github.com/scottschatz/software-capitalization.git
+cd software-capitalization
+npm install
+
+# ── Agent init (non-interactive) ──
+mkdir -p ~/.cap-agent
+cat > ~/.cap-agent/config.json << EOF
+{
+  "serverUrl": "$SERVER_URL",
+  "apiKey": "$API_KEY",
+  "email": "$EMAIL"
+}
+EOF
+
+# ── First sync (dry run to verify) ──
+npx tsx agent/src/cli.ts sync --dry-run
+
+# ── Install hooks + MCP server ──
+npx tsx agent/src/cli.ts hooks install
+npx tsx agent/src/cli.ts mcp install
+
+# ── Set up auto-sync timers ──
+REPO_DIR="$(pwd)"
+mkdir -p ~/.config/systemd/user
+for f in cap-sync.service cap-sync.timer cap-generate.service cap-generate.timer; do
+  sed "s|/home/sschatz/projects/software-capitalization|$REPO_DIR|g" "agent/$f" \
+    > ~/.config/systemd/user/$f
+done
+systemctl --user daemon-reload
+systemctl --user enable --now cap-sync.timer cap-generate.timer
+
+echo "✓ Done! Run 'npx tsx agent/src/cli.ts sync' to send your first data."
+```
+
+**Don't have an API key?** See Step 1 below.
+
+---
+
+### Step-by-Step (Detailed)
+
+<details>
+<summary>Click to expand the detailed walkthrough</summary>
+
+#### Step 1: Get an API Key
 
 1. Log into the web UI at `https://<server-url>` (uses your Townsquare Azure AD login)
 2. Go to **Settings** and click **Generate API Key**
 3. Copy the key (starts with `cap_`) — it's shown only once
 
-### Step 2: Initialize the Agent
+#### Step 2: Initialize the Agent
 
 ```bash
 # Clone the repo (or have it available locally)
@@ -62,7 +139,7 @@ The init wizard will ask for:
 
 This creates `~/.cap-agent/config.json` on your machine.
 
-### Step 3: Sync Your Data
+#### Step 3: Sync Your Data
 
 ```bash
 # Preview what will be synced (dry run)
@@ -79,7 +156,7 @@ The sync command reads:
 - **Claude Code sessions** from `~/.claude/projects/` (JSONL files) — extracts session duration, tool usage, files touched, user prompts
 - **Git commits** from all monitored project repos — extracts commit messages, line counts, files changed
 
-### Step 4: Install Hooks (Optional)
+#### Step 4: Install Hooks (Optional)
 
 Hooks capture real-time tool events as you use Claude Code, giving per-tool timing data for more precise active-time calculations. **Hooks are not required** — the system works well with agent sync alone, which already captures session metadata, tool breakdowns, user prompts, and git commits. Hooks add finer timing granularity on top of that.
 
@@ -97,7 +174,7 @@ npx tsx agent/src/cli.ts hooks status
 npx tsx agent/src/cli.ts hooks uninstall
 ```
 
-### Step 5: Install MCP Server (Optional)
+#### Step 5: Install MCP Server (Optional)
 
 The MCP server lets you query your capitalization data directly from Claude Code:
 
@@ -117,7 +194,7 @@ npx tsx agent/src/cli.ts mcp status
 npx tsx agent/src/cli.ts mcp uninstall
 ```
 
-### Step 6: Set Up Auto-Sync & Entry Generation (Recommended)
+#### Step 6: Set Up Auto-Sync & Entry Generation (Recommended)
 
 Run sync and entry generation automatically so you don't have to remember:
 
@@ -144,7 +221,7 @@ systemctl --user list-timers
 **What the timers do:**
 | Timer | Schedule | What It Does |
 |-------|----------|--------------|
-| `cap-sync.timer` | Mon-Fri 8am,10am,12pm,2pm,4pm,6pm | Syncs Claude sessions + git commits to server |
+| `cap-sync.timer` | Mon-Fri 8am–6pm every 2h + 11pm; Sat-Sun noon + 11pm | Syncs Claude sessions + git commits to server |
 | `cap-generate.timer` | Daily at 7:00 AM | Syncs first, then generates AI daily entries for yesterday |
 
 To check status or logs:
@@ -158,17 +235,43 @@ journalctl --user -u cap-generate.service --since today
 **Alternative — crontab:**
 ```bash
 crontab -e
-# Sync every 2 hours during business hours
-0 8,10,12,14,16,18 * * 1-5 cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync
+# Sync every 2 hours during business hours + 11pm; weekends noon + 11pm
+0 8,10,12,14,16,18,23 * * 1-5 cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync
+0 12,23 * * 0,6 cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync
 # Generate entries daily at 7 AM (syncs first, then generates)
 0 7 * * * cd /path/to/software-capitalization && npx tsx agent/src/cli.ts sync && npx tsx agent/src/cli.ts generate
 ```
+
+</details>
+
+### Verify Your Setup
+
+After setup, run these to confirm everything is working:
+
+```bash
+npx tsx agent/src/cli.ts status          # Config + last sync time
+npx tsx agent/src/cli.ts hooks status    # Hook registration
+npx tsx agent/src/cli.ts mcp status      # MCP server registration
+systemctl --user list-timers             # Auto-sync timers
+```
+
+Expected output: config found, hooks installed, MCP installed, two timers active.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `sync` fails with 401 | API key expired or wrong — regenerate in Settings |
+| No sessions found | Check `ls ~/.claude/projects/` — needs Claude Code activity |
+| Hooks not firing | Run `npx tsx agent/src/cli.ts hooks install` again |
+| Timers not running | Check `systemctl --user status cap-sync.timer` and repo path in service file |
+| `npm install` fails | Ensure Node.js 20+ (`node -v`) |
 
 ## Daily Workflow
 
 1. **Work normally** — Claude Code sessions and git commits are tracked automatically
 2. **Check your dashboard** — log into the web UI to see estimated hours
-3. **Review entries** — go to `/review/<date>` to confirm or adjust AI estimates
+3. **Review entries** — go to **Review** to confirm or adjust AI estimates
 4. **Quick confirm via email** — daily review emails include an "Approve All" button
 
 ## Admin Setup (Server)

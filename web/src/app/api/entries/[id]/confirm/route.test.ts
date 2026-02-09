@@ -6,22 +6,35 @@ vi.mock('@/lib/get-developer', () => ({
   getDeveloper: vi.fn(),
 }))
 
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    dailyEntry: {
-      findUniqueOrThrow: vi.fn(),
-      update: vi.fn(),
-      aggregate: vi.fn(),
+vi.mock('@/lib/prisma', () => {
+  const mockDailyEntry = {
+    findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
+    aggregate: vi.fn(),
+  }
+  const mockDailyEntryRevision = {
+    count: vi.fn(),
+    create: vi.fn(),
+  }
+  const mockManualEntry = {
+    aggregate: vi.fn(),
+  }
+  return {
+    prisma: {
+      dailyEntry: mockDailyEntry,
+      dailyEntryRevision: mockDailyEntryRevision,
+      manualEntry: mockManualEntry,
+      $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+        // Pass the same mocks as the tx object so existing mock setups work
+        return fn({
+          dailyEntry: mockDailyEntry,
+          dailyEntryRevision: mockDailyEntryRevision,
+          manualEntry: mockManualEntry,
+        })
+      }),
     },
-    dailyEntryRevision: {
-      count: vi.fn(),
-      create: vi.fn(),
-    },
-    manualEntry: {
-      aggregate: vi.fn(),
-    },
-  },
-}))
+  }
+})
 
 vi.mock('@/lib/period-lock', () => ({
   assertPeriodOpen: vi.fn(),

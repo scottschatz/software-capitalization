@@ -102,6 +102,7 @@ export const listProjectsQuerySchema = z.object({
   status: z.enum(PROJECT_STATUSES).optional(),
   phase: z.enum(PROJECT_PHASES).optional(),
   search: z.string().optional(),
+  developerId: z.string().optional(),
 })
 
 export type ListProjectsQuery = z.infer<typeof listProjectsQuerySchema>

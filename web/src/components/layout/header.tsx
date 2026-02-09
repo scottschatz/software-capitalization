@@ -20,9 +20,10 @@ interface HeaderProps {
 
 export function Header({ role }: HeaderProps) {
   const { data: session } = useSession()
-  const developer = (session as unknown as Record<string, unknown>)?.developer as
-    | { displayName: string; email: string; role: string }
-    | undefined
+
+  // Safely extract developer info attached by the session callback
+  const sessionRecord = session as (typeof session & { developer?: { displayName: string; email: string; role: string } }) | null
+  const developer = sessionRecord?.developer
 
   const displayName = developer?.displayName || session?.user?.name || 'User'
   const displayRole = developer?.role || role || 'developer'
