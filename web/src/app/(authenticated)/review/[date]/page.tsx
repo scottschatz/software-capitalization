@@ -66,6 +66,123 @@ export default async function ReviewDatePage({
     orderBy: { name: 'asc' },
   })
 
+  // Collect all referenced session and commit IDs to fetch in bulk
+  const allSessionIds = [...new Set(entries.flatMap((e) => e.sourceSessionIds))]
+  const allCommitIds = [...new Set(entries.flatMap((e) => e.sourceCommitIds))]
+
+  // sourceSessionIds/sourceCommitIds store DB primary keys (id), not sessionId/commitHash
+  const [sourceSessions, sourceCommits] = await Promise.all([
+    allSessionIds.length > 0
+      ? prisma.rawSession.findMany({
+          where: { id: { in: allSessionIds } },
+          select: {
+            id: true,
+            sessionId: true,
+            projectPath: true,
+            durationSeconds: true,
+            messageCount: true,
+            toolUseCount: true,
+            userPromptCount: true,
+            firstUserPrompt: true,
+            model: true,
+            dailyBreakdown: true,
+          },
+        })
+      : [],
+    allCommitIds.length > 0
+      ? prisma.rawCommit.findMany({
+          where: { id: { in: allCommitIds } },
+          select: {
+            id: true,
+            commitHash: true,
+            repoPath: true,
+            message: true,
+            filesChanged: true,
+            insertions: true,
+            deletions: true,
+            committedAt: true,
+          },
+        })
+      : [],
+  ])
+
+  // Count hook events by Claude sessionId (not DB id)
+  const claudeSessionIds = sourceSessions.map((s) => s.sessionId)
+  const hookEventCounts = claudeSessionIds.length > 0
+    ? await prisma.rawToolEvent.groupBy({
+        by: ['sessionId'],
+        where: { sessionId: { in: claudeSessionIds } },
+        _count: true,
+      })
+    : []
+
+  // Build lookup maps keyed by DB id (matching sourceSessionIds/sourceCommitIds)
+  const sessionMap = new Map(sourceSessions.map((s) => [s.id, s]))
+  const commitMap = new Map(sourceCommits.map((c) => [c.id, c]))
+  const hookCountByClaudeId = new Map(hookEventCounts.map((h) => [h.sessionId, h._count]))
+  const sessionIdToClaudeId = new Map(sourceSessions.map((s) => [s.id, s.sessionId]))
+
+  // Serialize entries for client component
+  const serializedEntries = entries.map((e) => ({
+    id: e.id,
+    date: e.date.toISOString(),
+    hoursEstimated: e.hoursEstimated,
+    phaseAuto: e.phaseAuto,
+    descriptionAuto: e.descriptionAuto,
+    hoursConfirmed: e.hoursConfirmed,
+    phaseConfirmed: e.phaseConfirmed,
+    descriptionConfirmed: e.descriptionConfirmed,
+    confirmedAt: e.confirmedAt?.toISOString() ?? null,
+    adjustmentReason: e.adjustmentReason,
+    hoursRaw: e.hoursRaw,
+    adjustmentFactor: e.adjustmentFactor,
+    modelUsed: e.modelUsed,
+    modelFallback: e.modelFallback,
+    workType: e.workType ?? null,
+    confidenceScore: e.confidenceScore ?? null,
+    outlierFlag: e.outlierFlag ?? null,
+    status: e.status,
+    sourceSessionIds: e.sourceSessionIds,
+    sourceCommitIds: e.sourceCommitIds,
+    project: e.project,
+    sourceSessions: e.sourceSessionIds.map((dbId) => {
+      const s = sessionMap.get(dbId)
+      if (!s) return { sessionId: dbId }
+      const claudeId = sessionIdToClaudeId.get(dbId) ?? s.sessionId
+      // Extract per-day stats from dailyBreakdown if available
+      const entryDateStr = e.date.toISOString().slice(0, 10)
+      const breakdown = Array.isArray(s.dailyBreakdown) ? s.dailyBreakdown as Array<Record<string, unknown>> : []
+      const daySlice = breakdown.find((d) => String(d.date) === entryDateStr)
+      const hasSlice = !!daySlice
+      return {
+        sessionId: s.sessionId,
+        projectPath: s.projectPath,
+        durationMinutes: s.durationSeconds ? Math.round(s.durationSeconds / 60) : null,
+        activeMinutes: hasSlice ? (daySlice.activeMinutes as number ?? null) : null,
+        messageCount: hasSlice ? (daySlice.messageCount as number ?? 0) : s.messageCount,
+        toolUseCount: hasSlice ? (daySlice.toolUseCount as number ?? 0) : s.toolUseCount,
+        userPromptCount: hasSlice ? (daySlice.userPromptCount as number ?? null) : s.userPromptCount,
+        firstUserPrompt: s.firstUserPrompt,
+        model: s.model,
+        hookEventCount: hookCountByClaudeId.get(claudeId) ?? 0,
+        isMultiDay: breakdown.length > 1,
+      }
+    }),
+    sourceCommits: e.sourceCommitIds.map((dbId) => {
+      const c = commitMap.get(dbId)
+      if (!c) return { commitHash: dbId }
+      return {
+        commitHash: c.commitHash,
+        repoPath: c.repoPath,
+        message: c.message,
+        filesChanged: c.filesChanged,
+        insertions: c.insertions,
+        deletions: c.deletions,
+        committedAt: c.committedAt.toISOString(),
+      }
+    }),
+  }))
+
   const pendingCount = entries.filter((e) => e.status === 'pending').length
   const confirmedCount = entries.filter((e) => e.status === 'confirmed').length
   const totalHours = entries.reduce((sum, e) => sum + (e.hoursConfirmed ?? e.hoursEstimated ?? 0), 0)
@@ -156,13 +273,10 @@ export default async function ReviewDatePage({
         </Card>
       ) : (
         <div className="space-y-4">
-          {entries.map((entry) => (
+          {serializedEntries.map((entry) => (
             <EntryCard
               key={entry.id}
-              entry={{
-                ...entry,
-                confirmedAt: entry.confirmedAt?.toISOString() ?? null,
-              }}
+              entry={entry}
               projects={projects}
             />
           ))}
@@ -177,6 +291,18 @@ export default async function ReviewDatePage({
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-medium">{me.project?.name}</span>
                       <div className="flex items-center gap-2">
+                        {me.status === 'pending_approval' && (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs">Pending Approval</Badge>
+                        )}
+                        {me.status === 'approved' && (
+                          <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">Approved</Badge>
+                        )}
+                        {me.status === 'confirmed' && (
+                          <Badge variant="secondary" className="text-xs">Confirmed</Badge>
+                        )}
+                        {me.status === 'rejected' && (
+                          <Badge className="bg-red-100 text-red-800 border-red-200 text-xs">Rejected</Badge>
+                        )}
                         <Badge variant="outline" className="text-xs">{me.phase}</Badge>
                         <span className="text-sm font-semibold">{me.hours}h</span>
                       </div>

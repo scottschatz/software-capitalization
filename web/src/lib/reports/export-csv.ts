@@ -14,9 +14,18 @@ export function buildCsv(
     'Project',
     'Hours',
     'Phase',
+    'Work Type',
     'Type',
     'Capitalizable',
     'Status',
+    'Hours (Raw)',
+    'Adj. Factor',
+    'Hours (Est.)',
+    'Adjustment Reason',
+    'AI Model',
+    'Confirmed By',
+    'Confirmed At',
+    'Confirm Method',
     'Description',
   ]
 
@@ -29,24 +38,45 @@ export function buildCsv(
       e.projectName ?? '',
       String(e.hoursConfirmed ?? e.hoursEstimated ?? 0),
       e.phaseConfirmed ?? e.projectPhase ?? '',
+      e.workType ?? '',
       'AI-Generated',
       e.capitalizable ? 'Yes' : 'No',
       e.status,
+      e.hoursRaw != null ? String(e.hoursRaw) : '',
+      e.adjustmentFactor != null ? String(e.adjustmentFactor) : '',
+      e.hoursEstimated != null ? String(e.hoursEstimated) : '',
+      csvEscape(e.adjustmentReason ?? ''),
+      csvEscape(e.modelUsed ?? ''),
+      csvEscape(e.confirmedBy ?? ''),
+      e.confirmedAt ? format(new Date(e.confirmedAt), "yyyy-MM-dd'T'HH:mm:ss'Z'") : '',
+      csvEscape(e.confirmationMethod ?? ''),
       csvEscape(e.descriptionConfirmed ?? ''),
     ])
   }
 
   for (const e of manualEntries) {
+    let desc = e.description
+    if (e.hours > 4) desc = `[HIGH HOURS] ${desc}`
+    if (e.status === 'pending_approval') desc = `[PENDING APPROVAL] ${desc}`
     rows.push([
       format(new Date(e.date), 'yyyy-MM-dd'),
       e.developerName,
       e.projectName,
       String(e.hours),
       e.phase,
+      '', // Work Type (N/A for manual entries)
       'Manual',
       e.capitalizable ? 'Yes' : 'No',
-      'confirmed',
-      csvEscape(e.description),
+      e.status,
+      '', // Hours (Raw)
+      '', // Adj. Factor
+      '', // Hours (Est.)
+      '', // Adjustment Reason
+      '', // AI Model
+      '', // Confirmed By
+      '', // Confirmed At
+      '', // Confirm Method
+      csvEscape(desc),
     ])
   }
 

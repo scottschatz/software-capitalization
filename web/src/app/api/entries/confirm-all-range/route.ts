@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDeveloper } from '@/lib/get-developer'
 import { prisma } from '@/lib/prisma'
+import { assertPeriodOpen, PeriodLockedError } from '@/lib/period-lock'
 
 // POST /api/entries/confirm-all-range — Bulk confirm all pending entries across multiple dates
 export async function POST(request: NextRequest) {
@@ -19,6 +20,18 @@ export async function POST(request: NextRequest) {
   try {
     const dateObjs = dates.map((d) => new Date(`${d}T00:00:00.000Z`))
 
+    // Period lock check — check each date before processing
+    for (const dateObj of dateObjs) {
+      try {
+        await assertPeriodOpen(dateObj)
+      } catch (err) {
+        if (err instanceof PeriodLockedError) {
+          return NextResponse.json({ error: err.message }, { status: 423 })
+        }
+        throw err
+      }
+    }
+
     const entries = await prisma.dailyEntry.findMany({
       where: {
         developerId: developer.id,
@@ -26,7 +39,7 @@ export async function POST(request: NextRequest) {
         status: 'pending',
       },
       include: {
-        project: { select: { phase: true } },
+        project: { select: { phase: true, requiresManagerApproval: true } },
       },
     })
 
@@ -38,6 +51,7 @@ export async function POST(request: NextRequest) {
     const byDate: Record<string, number> = {}
 
     for (const entry of entries) {
+      const newStatus = entry.project?.requiresManagerApproval ? 'pending_approval' : 'confirmed'
       await prisma.dailyEntry.update({
         where: { id: entry.id },
         data: {
@@ -46,7 +60,20 @@ export async function POST(request: NextRequest) {
           descriptionConfirmed: entry.descriptionAuto?.split('\n---\n')[0] ?? 'Confirmed as-is',
           confirmedAt: new Date(),
           confirmedById: developer.id,
-          status: 'confirmed',
+          confirmationMethod: 'bulk_range',
+          status: newStatus,
+        },
+      })
+      await prisma.dailyEntryRevision.create({
+        data: {
+          entryId: entry.id,
+          revision: 1,
+          changedById: developer.id,
+          field: 'status',
+          oldValue: 'pending',
+          newValue: newStatus,
+          reason: 'Accepted AI suggestion via bulk confirmation',
+          authMethod: 'web_session',
         },
       })
       confirmed++

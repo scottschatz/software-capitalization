@@ -10,6 +10,8 @@ import {
   FileBarChart,
   Settings,
   Users,
+  BookOpen,
+  ShieldCheck,
 } from 'lucide-react'
 
 const navItems = [
@@ -17,7 +19,12 @@ const navItems = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/review', label: 'Review', icon: ClipboardCheck },
   { href: '/reports', label: 'Reports', icon: FileBarChart },
+  { href: '/methodology', label: 'Methodology', icon: BookOpen },
   { href: '/settings', label: 'Settings', icon: Settings },
+]
+
+const managerItems = [
+  { href: '/approvals', label: 'Approvals', icon: ShieldCheck },
 ]
 
 const adminItems = [
@@ -31,8 +38,14 @@ interface SidebarProps {
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname()
   const isAdmin = role === 'admin'
+  const isManager = role === 'manager'
+  const isManagerOrAdmin = isAdmin || isManager
 
-  const allItems = isAdmin ? [...navItems, ...adminItems] : navItems
+  const allItems = [
+    ...navItems,
+    ...(isManagerOrAdmin ? managerItems : []),
+    ...(isAdmin ? adminItems : []),
+  ]
 
   return (
     <aside className="hidden w-64 border-r bg-muted/30 md:block">

@@ -8,6 +8,7 @@ export interface DeveloperSession {
   email: string
   displayName: string
   role: string
+  adjustmentFactor: number
 }
 
 export async function getDeveloper(): Promise<DeveloperSession | null> {
@@ -17,7 +18,7 @@ export async function getDeveloper(): Promise<DeveloperSession | null> {
 
   const developer = await prisma.developer.findUnique({
     where: { email },
-    select: { id: true, email: true, displayName: true, role: true, active: true },
+    select: { id: true, email: true, displayName: true, role: true, active: true, adjustmentFactor: true },
   })
 
   if (!developer || !developer.active) return null
@@ -35,6 +36,14 @@ export async function requireAdmin(): Promise<DeveloperSession> {
   const developer = await requireDeveloper()
   if (developer.role !== 'admin') {
     throw new Error('Admin access required')
+  }
+  return developer
+}
+
+export async function requireManagerOrAdmin(): Promise<DeveloperSession> {
+  const developer = await requireDeveloper()
+  if (developer.role !== 'admin' && developer.role !== 'manager') {
+    throw new Error('Manager or admin access required')
   }
   return developer
 }

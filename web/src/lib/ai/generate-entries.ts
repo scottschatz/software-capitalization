@@ -1,34 +1,47 @@
-import { getAIClient } from './client'
+import { completeWithFallback } from './client'
 import { buildDailyEntryPrompt, type DailyActivityContext, type AIEntryResult } from './prompts'
 
+export interface GenerationResult {
+  entries: AIEntryResult[]
+  modelUsed: string
+  fallback: boolean
+}
+
 /**
- * Call Claude to analyze daily activity and generate entry suggestions.
+ * Call AI to analyze daily activity and generate entry suggestions.
+ * Tries local model first, falls back to Anthropic Haiku on error.
  */
 export async function generateDailyEntries(
-  ctx: DailyActivityContext
-): Promise<AIEntryResult[]> {
+  ctx: DailyActivityContext,
+  historicalStats?: {
+    avgHoursPerDay: number
+    avgProjectsPerDay: number
+    confirmedDays: number
+    periodDays: number
+  },
+): Promise<GenerationResult> {
   // If no activity, skip the AI call
   if (ctx.sessions.length === 0 && ctx.commits.length === 0) {
-    return []
+    return { entries: [], modelUsed: 'none', fallback: false }
   }
 
-  const client = getAIClient()
-  const prompt = buildDailyEntryPrompt(ctx)
+  const prompt = buildDailyEntryPrompt(ctx, historicalStats)
+  const result = await completeWithFallback(prompt)
 
-  const response = await client.messages.create({
-    model: 'claude-opus-4-6',
-    max_tokens: 2048,
-    messages: [{ role: 'user', content: prompt }],
-  })
+  const entries = parseAIResponse(result.text)
 
-  // Extract text content
-  const textBlock = response.content.find((b) => b.type === 'text')
-  if (!textBlock || textBlock.type !== 'text') {
-    return []
+  return {
+    entries,
+    modelUsed: result.modelUsed,
+    fallback: result.fallback,
   }
+}
 
-  // Parse JSON from response (may be wrapped in ```json blocks)
-  const text = textBlock.text
+/**
+ * Parse JSON entry array from AI response text.
+ * Handles both raw JSON and ```json code blocks.
+ */
+function parseAIResponse(text: string): AIEntryResult[] {
   const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\[[\s\S]*\]/)
   if (!jsonMatch) {
     return []

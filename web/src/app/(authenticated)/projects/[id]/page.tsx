@@ -18,10 +18,10 @@ import { PhaseBadge, StatusBadge } from '@/components/projects/phase-badge'
 import { PhaseChangeDialog } from '@/components/projects/phase-change-dialog'
 import { PhaseChangeReview } from '@/components/projects/phase-change-review'
 import { CreateEnhancementDialog } from '@/components/projects/create-enhancement-dialog'
-import { Pencil, GitBranch, FolderCode } from 'lucide-react'
+import { ProjectNarrative } from '@/components/projects/project-narrative'
+import { InfoTooltip } from '@/components/ui/info-tooltip'
+import { Pencil, GitBranch, FolderCode, AlertTriangle } from 'lucide-react'
 import { format } from 'date-fns'
-
-const APPROVAL_EMAIL = 'scott.schatz@townsquaremedia.com'
 
 const phaseLabels: Record<string, string> = {
   preliminary: 'Preliminary',
@@ -44,7 +44,7 @@ export default async function ProjectDetailPage({
     notFound()
   }
 
-  const isAdmin = developer.role === 'admin' && developer.email === APPROVAL_EMAIL
+  const isAdmin = developer.role === 'admin' || developer.role === 'manager'
   const canReview = isAdmin
   const capitalizable = project.phase === 'application_development'
   const isEnhancement = !!project.parentProjectId
@@ -60,6 +60,28 @@ export default async function ProjectDetailPage({
           <Link href={`/projects/${project.parentProjectId}`} className="underline hover:text-foreground">
             parent project
           </Link>
+        </div>
+      )}
+
+      {/* Authorization warning for capitalizable projects */}
+      {capitalizable && (!project.managementAuthorized || !project.probableToComplete) && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            Hours on this project cannot be capitalized until management authorization is documented (ASU 2025-06).
+            {!project.managementAuthorized && ' Management authorization is not yet recorded.'}
+            {!project.probableToComplete && ' Probability of completion has not been assessed.'}
+          </span>
+        </div>
+      )}
+
+      {/* Suspended/Abandoned project warning */}
+      {(project.status === 'suspended' || project.status === 'abandoned') && (
+        <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            This project is {project.status}. No new daily entries will be generated and hours cannot be capitalized.
+          </span>
         </div>
       )}
 
@@ -117,6 +139,7 @@ export default async function ProjectDetailPage({
             )}
           </TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="narrative">Narrative</TabsTrigger>
           {isPostImpl && !isEnhancement && (
             <TabsTrigger value="enhancements">
               Enhancements
@@ -140,15 +163,15 @@ export default async function ProjectDetailPage({
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Phase</span>
+                  <span className="text-muted-foreground">Phase <InfoTooltip text="Phase transitions require admin/manager approval and are logged for audit purposes per ASC 350-40-35." /></span>
                   <span>{phaseLabels[project.phase]}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Management Authorized</span>
+                  <span className="text-muted-foreground">Management Authorized <InfoTooltip text="ASU 2025-06 requires documented management authorization before capitalization can begin. This includes commitment to fund the project and an assessment that completion is probable." /></span>
                   <span>{project.managementAuthorized ? 'Yes' : 'No'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Probable to Complete</span>
+                  <span className="text-muted-foreground">Probable to Complete <InfoTooltip text="ASU 2025-06 requires ongoing assessment that the project is probable to be completed and used as intended." /></span>
                   <span>{project.probableToComplete ? 'Yes' : 'No'}</span>
                 </div>
                 <div className="flex justify-between">
@@ -340,6 +363,11 @@ export default async function ProjectDetailPage({
           <p className="text-sm text-muted-foreground py-4">
             Activity data will appear here once the agent begins syncing session and commit data.
           </p>
+        </TabsContent>
+
+        {/* Narrative Tab */}
+        <TabsContent value="narrative" className="space-y-4">
+          <ProjectNarrative projectId={project.id} role={developer.role} />
         </TabsContent>
 
         {/* Enhancements Tab — only for post-impl parent projects */}

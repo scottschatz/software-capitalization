@@ -55,10 +55,13 @@ export interface AIEntryResult {
   projectName: string
   summary: string
   hoursEstimate: number
-  phase: string
-  capitalizable: boolean
   confidence: number // 0-1
   reasoning: string
+  // AI's suggestion only — server uses the project's configured phase for actual
+  // phase/capitalizability determination. Kept for enhancement detection: if AI
+  // suggests "application_development" but project is post_implementation, that
+  // signals potential enhancement work.
+  phaseSuggestion?: string
   enhancementSuggested?: boolean  // true if post-impl project has new feature work
   enhancementReason?: string      // why enhancement was suggested
 }
@@ -101,7 +104,12 @@ function buildToolEventsSection(
   return lines.join('\n') + '\n\n'
 }
 
-export function buildDailyEntryPrompt(ctx: DailyActivityContext): string {
+export function buildDailyEntryPrompt(ctx: DailyActivityContext, historicalStats?: {
+  avgHoursPerDay: number
+  avgProjectsPerDay: number
+  confirmedDays: number
+  periodDays: number
+}): string {
   const projectList = ctx.projects.map((p) => {
     const repos = p.repos.map((r) => r.repoPath).join(', ')
     const paths = p.claudePaths.map((c) => `${c.claudePath} → ${c.localPath}`).join(', ')
@@ -126,6 +134,10 @@ export function buildDailyEntryPrompt(ctx: DailyActivityContext): string {
       }).format(new Date(iso))
     } catch { return iso }
   }
+
+  // Track remaining character budget for user prompt content across all sessions
+  const PROMPT_CHAR_BUDGET = 8000
+  let promptCharsRemaining = PROMPT_CHAR_BUDGET
 
   const sessionList = ctx.sessions.map((s) => {
     const dur = s.durationSeconds ? `${Math.round(s.durationSeconds / 60)}min` : 'unknown'
@@ -159,11 +171,36 @@ export function buildDailyEntryPrompt(ctx: DailyActivityContext): string {
       lines.push(`    Files touched: ${files}${more}`)
     }
     // Full timestamped conversation transcript — what the developer directed and when
+    // Truncated if cumulative prompt text exceeds the character budget
     if (s.userPrompts && s.userPrompts.length > 0) {
-      lines.push(`    Developer conversation transcript (${s.userPrompts.length} prompts):`)
-      for (const p of s.userPrompts) {
-        const time = formatLocalTime(p.time)
-        lines.push(`      [${time}] "${p.text}"`)
+      if (promptCharsRemaining <= 0) {
+        lines.push(`    Developer conversation transcript (${s.userPrompts.length} prompts): (truncated — ${s.userPrompts.length} prompts omitted, prompt budget exhausted)`)
+      } else {
+        lines.push(`    Developer conversation transcript (${s.userPrompts.length} prompts):`)
+        let promptsIncluded = 0
+        for (const p of s.userPrompts) {
+          const promptText = p.text
+          if (promptCharsRemaining <= 0) {
+            const omitted = s.userPrompts.length - promptsIncluded
+            lines.push(`      (truncated — ${omitted} more prompts omitted)`)
+            break
+          }
+          const time = formatLocalTime(p.time)
+          if (promptText.length > promptCharsRemaining) {
+            // Include a truncated version of this prompt
+            lines.push(`      [${time}] "${promptText.slice(0, promptCharsRemaining)}..." (truncated)`)
+            promptCharsRemaining = 0
+            promptsIncluded++
+            const omitted = s.userPrompts.length - promptsIncluded
+            if (omitted > 0) {
+              lines.push(`      (truncated — ${omitted} more prompts omitted)`)
+            }
+            break
+          }
+          lines.push(`      [${time}] "${promptText}"`)
+          promptCharsRemaining -= promptText.length
+          promptsIncluded++
+        }
       }
     } else if (s.userPromptSamples && s.userPromptSamples.length > 0) {
       // Legacy fallback for old data without timestamps
@@ -179,13 +216,45 @@ export function buildDailyEntryPrompt(ctx: DailyActivityContext): string {
   const totalDeletions = ctx.commits.reduce((sum, c) => sum + c.deletions, 0)
   const totalFilesChanged = ctx.commits.reduce((sum, c) => sum + c.filesChanged, 0)
 
-  const commitList = ctx.commits.map((c) => {
-    return `- ${c.commitHash.slice(0, 8)} | ${c.repoPath} | ${c.message} | +${c.insertions}/-${c.deletions} in ${c.filesChanged} files`
-  }).join('\n')
+  // Pre-group commits by matched project so models don't have to cross-reference repo paths
+  const commitsByProject = new Map<string, { projectName: string; projectId: string | null; commits: typeof ctx.commits }>()
+  for (const c of ctx.commits) {
+    const matchedProject = ctx.projects.find((p) => p.repos.some((r) => c.repoPath === r.repoPath))
+    const key = matchedProject ? matchedProject.id : `unmatched:${c.repoPath}`
+    if (!commitsByProject.has(key)) {
+      commitsByProject.set(key, {
+        projectName: matchedProject ? matchedProject.name : `Unmatched: ${c.repoPath.split('/').pop() ?? c.repoPath}`,
+        projectId: matchedProject ? matchedProject.id : null,
+        commits: [],
+      })
+    }
+    commitsByProject.get(key)!.commits.push(c)
+  }
+
+  const commitList = Array.from(commitsByProject.entries()).map(([, group]) => {
+    const ins = group.commits.reduce((s, c) => s + c.insertions, 0)
+    const del = group.commits.reduce((s, c) => s + c.deletions, 0)
+    const files = group.commits.reduce((s, c) => s + c.filesChanged, 0)
+    const lines = [`### ${group.projectName}${group.projectId ? ` (ID: ${group.projectId})` : ''} — ${group.commits.length} commit(s), +${ins}/-${del} in ${files} files`]
+    for (const c of group.commits) {
+      lines.push(`- ${c.commitHash.slice(0, 8)} | ${c.message} | +${c.insertions}/-${c.deletions} in ${c.filesChanged} files`)
+    }
+    return lines.join('\n')
+  }).join('\n\n')
+
+  // Build historical context section if stats are available
+  const historicalSection = historicalStats && historicalStats.confirmedDays > 0
+    ? `## Historical Context (last ${historicalStats.periodDays} days)
+This developer typically works ${historicalStats.avgHoursPerDay.toFixed(1)} hours/day across ${historicalStats.avgProjectsPerDay.toFixed(1)} projects/day.
+${historicalStats.confirmedDays} of the last ${historicalStats.periodDays} days had confirmed activity.
+Use this as a baseline — significant deviations should be noted in the confidence score.
+
+`
+    : ''
 
   return `You are an AI assistant helping with software capitalization tracking under ASC 350-40.
 
-## Context
+${historicalSection}## Context
 Developer: ${ctx.developer.displayName} (${ctx.developer.email})
 Date: ${ctx.date}
 
@@ -197,64 +266,28 @@ ${projectList || 'No projects configured'}
 Note: Each session below includes "Active time" (gap-aware: only counting intervals <15min between messages, excluding breaks/idle time) and a full timestamped transcript of every human prompt. Use these to reconstruct what the developer was doing, when, and how engaged they were.
 ${sessionList || 'No sessions'}
 
-## Git Commits (${ctx.date})
-${ctx.commits.length > 0 ? `**Totals: ${ctx.commits.length} commit(s) | +${totalInsertions}/-${totalDeletions} in ${totalFilesChanged} files**` : ''}
+## Git Commits by Project (${ctx.date})
+${ctx.commits.length > 0 ? `**Totals: ${ctx.commits.length} commit(s) | +${totalInsertions}/-${totalDeletions} in ${totalFilesChanged} files across ${commitsByProject.size} project(s)**\nIMPORTANT: Commits below are already grouped by project. Create a SEPARATE entry for EACH project group that has commits.` : ''}
 ${commitList || 'No commits'}
 
 ${buildToolEventsSection(ctx.toolEvents ?? [], formatLocalTime)}
-## ASC 350-40 Phase Rules
-- **Preliminary**: Conceptual design, evaluating alternatives, determining technology. Hours are EXPENSED.
-- **Application Development**: Active coding, testing, installation, data conversion, building new features, writing tests for new functionality, integrating new systems, substantial enhancements. Hours are CAPITALIZED.
-- **Post-Implementation**: Training, maintenance, minor bug fixes for production issues, routine support, minor cosmetic tweaks. Hours are EXPENSED.
-
-Only hours in the "Application Development" phase are capitalizable.
-
-## Phase Classification Guidance
-Almost all developer work should be classified as **application_development** (capitalizable). The only exceptions:
-
-1. **Preliminary** — VERY RARE. Only if the session is purely research/evaluation with NO actual code written (e.g., reading docs, comparing frameworks, writing a design doc). If any code was written, it's application_development.
-
-2. **Application Development** — THE DEFAULT. Use this for:
-   - Building new features (obviously)
-   - Bug fixes found DURING development (part of the dev cycle)
-   - Refactoring during development
-   - Writing tests
-   - Integration work
-   - Configuration and infrastructure for the project
-   - Basically ALL coding work on a project that hasn't been formally released
-
-3. **Post-Implementation** — Only if the project has been formally released/deployed to production AND the work is purely maintenance:
-   - Minor bug fixes on released production software
-   - Routine dependency updates
-   - Config tweaks
-   - NOTE: If significant NEW features are being added to a released project, that work should be classified as application_development — it likely represents a new development phase (Phase 2, 3, etc.)
-
-**When in doubt, use application_development.** It's better to capitalize and have an auditor question it than to miss legitimate capitalizable hours.
-
 ## Instructions
-Analyze the sessions and commits for ${ctx.date}. Group activity by project and generate one entry per project the developer worked on.
+Analyze the sessions and commits for ${ctx.date}. Generate **one entry per project** that has activity. The commits section above is already grouped by project — create an entry for EACH project group (do NOT merge different projects into one entry).
 
-For each entry estimate:
-1. **Project match**: Match sessions (by claude path) and commits (by repo path) to the correct project. If a session/commit doesn't match any project, use "Unmatched" as the project name.
-2. **Hours**: Estimate active HUMAN development hours — the time the developer spent directing, reviewing, and working alongside the AI. Key considerations:
-   - **The "Active time" is the PRIMARY guide.** Each session shows a gap-aware "Active time" that only counts intervals where messages are <15 minutes apart (breaks/idle excluded). This is the best estimate of how long the developer + AI were continuously engaged. Your hour estimate should be **at or below** this number.
-   - **Use the conversation transcript to refine further.** The timestamped prompts show exactly when the developer was at the keyboard. Look for:
-     - **Gaps** between prompts (>15 min = break already excluded from active time)
-     - **Frequency** of prompts (many prompts close together = actively engaged)
-     - **Content** of prompts ("continue" = passive monitoring, count as ~1 min; detailed technical instructions = active directing, count as ~5 min)
-   - **50% rule of thumb.** During active AI-assisted coding, the developer is typically focused on the task about half the time (reading AI output, reviewing code, writing prompts, testing) and multitasking or context-switching the other half. So: **Active time × 0.5 = estimated human development hours.**
-   - **Practical heuristic**: Start with the "Active time" value (already excludes breaks). Multiply by 0.5 to estimate human-active hours. Cross-check against prompt count (each prompt cycle ≈ 3-5 min of human time) and commits. Use whichever method gives the more conservative estimate.
-   - **Maximum reasonable workday is 8 hours.** Most days should be 2-5 hours total across all projects.
-   - **Use commits for scope validation.** Commits confirm what was actually produced. ~20-40 minutes of human time per commit of moderate complexity.
-   - Be conservative — overestimating is worse than underestimating for capitalization compliance.
-3. **Summary**: Write a 1-2 sentence description of what was SPECIFICALLY done based on commit messages and tool activity. Reference actual features, components, or fixes by name (e.g., "Built reporting module with monthly capitalization reports and Excel export" not "Worked on the project"). Use commit messages as the primary source of truth for what was accomplished.
-4. **Phase**: Start with the project's current phase, but override based on the actual work as described in the Phase Classification Guidance above. If the work is clearly feature development (adding new features, building new systems, substantial new code), use **application_development** regardless of the project's listed phase.
-5. **Capitalizable**: true only if phase is "application_development".
-6. **Reasoning**: Cite the specific evidence: number of sessions used, total duration, number of user prompts, number of commits, and lines changed. Reference specific commit messages that informed your summary.
+**Your job**: Match activity to projects, estimate hours, summarize work, provide reasoning.
+**NOT your job**: Phase classification and capitalizability are determined by the server from project configuration. You do NOT need to decide these.
 
-7. **Enhancement detection**: If a project is in post_implementation phase (or has a go-live date) but the work looks like **significant new feature development** (not minor maintenance), check:
-   - If an enhancement project already exists for this parent project, assign the entry to the enhancement project instead.
-   - If NO enhancement project exists, set \`enhancementSuggested: true\` and explain in \`enhancementReason\` why the work looks like new development rather than maintenance (e.g., "New integrations and features being added to a post-implementation project — suggests an Enhancement Phase should be created").
+For each entry:
+1. **Project match**: Match sessions (by claude path) and commits (by repo path) to the correct project. For unmatched repos, set projectId to null and use the repo name as projectName.
+2. **Hours**: Estimate active HUMAN development hours — the time the developer was actively engaged (reading output, writing prompts, reviewing code, testing). Do NOT apply any multiplier or discount factor; the server applies an attention ratio separately.
+   - **"Active time" is the PRIMARY input.** Each session shows gap-aware active time (only intervals <15min between messages). Use this as your starting point.
+   - **Conversation transcript refines further.** Frequent, detailed prompts = fully engaged for the session duration. Sparse "continue" prompts = less active engagement — reduce proportionally.
+   - **Cross-check against commits**: Use commit count and complexity as a sanity check on the session-based estimate.
+   - **Automated/scheduled commits = 0 hours.** If a commit has a formulaic message (e.g., "Update rankings YYYY-MM-DD HH:MM"), was committed at an unusual hour (e.g., 6:15 AM), and has symmetrical or trivial changes (e.g., +8/-8), it's an automated job — assign **0 hours**.
+   - **Commit-only projects** (no matching Claude session): If a project only has commits and no session activity, estimate based on commit complexity alone.
+3. **Summary**: 1-2 sentences of what was SPECIFICALLY done. Reference actual features, components, or fixes by name. Use commit messages as the primary source.
+4. **Reasoning**: Cite evidence: sessions, active time, prompt count, commits, lines changed. Reference specific commit messages.
+5. **Enhancement detection** (only for post_implementation projects with a go-live date): If the work looks like **significant new feature development** rather than maintenance, set \`enhancementSuggested: true\` and explain in \`enhancementReason\`.
 
 Respond with a JSON array of entries:
 \`\`\`json
@@ -264,15 +297,19 @@ Respond with a JSON array of entries:
     "projectName": "Project Name",
     "summary": "Brief description of work done",
     "hoursEstimate": 2.5,
-    "phase": "application_development",
-    "capitalizable": true,
-    "confidence": 0.85,
+    "confidence": 0.85,  // see calibration rubric below
     "reasoning": "Why this estimate",
     "enhancementSuggested": false,
     "enhancementReason": null
   }
 ]
 \`\`\`
+
+Confidence calibration:
+- 0.90-1.0: Active time data available with matching commits and clear project mapping
+- 0.75-0.89: Sessions present but missing commits, or commits without matching sessions
+- 0.60-0.74: Ambiguous project mapping or limited activity signals
+- Below 0.60: Very uncertain — minimal data, possible misattribution
 
 If there is no meaningful activity for the date, return an empty array: []`
 }

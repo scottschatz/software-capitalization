@@ -90,28 +90,62 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
     { header: 'Project', key: 'project', width: 25 },
     { header: 'Hours', key: 'hours', width: 10 },
     { header: 'Phase', key: 'phase', width: 24 },
+    { header: 'Work Type', key: 'workType', width: 16 },
     { header: 'Type', key: 'type', width: 14 },
     { header: 'Capitalizable', key: 'cap', width: 14 },
     { header: 'Status', key: 'status', width: 12 },
+    { header: 'Hours (Raw)', key: 'hoursRaw', width: 12 },
+    { header: 'Adj. Factor', key: 'adjFactor', width: 12 },
+    { header: 'Hours (Est.)', key: 'hoursEst', width: 12 },
+    { header: 'Adjustment Reason', key: 'adjReason', width: 22 },
+    { header: 'AI Model', key: 'aiModel', width: 18 },
+    { header: 'Confirmed By', key: 'confirmedBy', width: 18 },
+    { header: 'Confirmed At', key: 'confirmedAt', width: 20 },
+    { header: 'Confirm Method', key: 'confirmMethod', width: 16 },
     { header: 'Description', key: 'description', width: 50 },
   ]
 
-  detail.getRow(1).eachCell((cell) => {
+  // Insert legend row above headers (pushes headers to row 2)
+  detail.spliceRows(1, 0, ['Note: Rows highlighted in light blue indicate entries modified after initial confirmation (revision count > 0).'])
+  detail.mergeCells('A1:R1')
+  const legendCell = detail.getCell('A1')
+  legendCell.font = { italic: true, color: { argb: 'FF6B7280' } }
+
+  // Style header row (now row 2 after legend insertion)
+  detail.getRow(2).eachCell((cell) => {
     cell.style = headerStyle
   })
 
-  // All entries sorted by date
-  const allRows: Array<{
+  const revisionHighlight: Partial<ExcelJS.Fill> = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE3F2FD' },
+  }
+
+  // All entries sorted by date, with source entry for audit fields
+  interface DetailRowData {
     date: string
     developer: string
     project: string
     hours: number
     phase: string
+    workType: string
     type: string
     cap: string
     status: string
+    hoursRaw: number | null
+    adjFactor: number | null
+    hoursEst: number | null
+    adjReason: string
+    aiModel: string
+    confirmedBy: string
+    confirmedAt: string
+    confirmMethod: string
     description: string
-  }> = []
+    _revisionCount: number
+  }
+
+  const allRows: DetailRowData[] = []
 
   for (const e of data.dailyEntries) {
     const phase = e.phaseConfirmed ?? e.projectPhase ?? ''
@@ -121,31 +155,56 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
       project: e.projectName ?? '',
       hours: e.hoursConfirmed ?? e.hoursEstimated ?? 0,
       phase: PHASE_LABELS[phase] ?? phase,
+      workType: e.workType ?? '',
       type: 'AI-Generated',
       cap: e.capitalizable ? 'Yes' : 'No',
       status: e.status,
+      hoursRaw: e.hoursRaw ?? null,
+      adjFactor: e.adjustmentFactor ?? null,
+      hoursEst: e.hoursEstimated ?? null,
+      adjReason: e.adjustmentReason ?? '',
+      aiModel: e.modelUsed ?? '',
+      confirmedBy: e.confirmedBy ?? '',
+      confirmedAt: e.confirmedAt ? format(new Date(e.confirmedAt), "yyyy-MM-dd'T'HH:mm:ss'Z'") : '',
+      confirmMethod: e.confirmationMethod ?? '',
       description: (e.descriptionConfirmed ?? '').split('\n---\n')[0],
+      _revisionCount: e.revisionCount,
     })
   }
 
   for (const e of data.manualEntries) {
+    let desc = e.description
+    if (e.hours > 4) desc = `[HIGH HOURS] ${desc}`
+    if (e.status === 'pending_approval') desc = `[PENDING APPROVAL] ${desc}`
     allRows.push({
       date: format(new Date(e.date), 'yyyy-MM-dd'),
       developer: e.developerName,
       project: e.projectName,
       hours: e.hours,
       phase: PHASE_LABELS[e.phase] ?? e.phase,
+      workType: '',
       type: 'Manual',
       cap: e.capitalizable ? 'Yes' : 'No',
-      status: 'confirmed',
-      description: e.description,
+      status: e.status,
+      hoursRaw: null,
+      adjFactor: null,
+      hoursEst: null,
+      adjReason: '',
+      aiModel: '',
+      confirmedBy: '',
+      confirmedAt: '',
+      confirmMethod: '',
+      description: desc,
+      _revisionCount: 0,
     })
   }
 
   allRows.sort((a, b) => a.date.localeCompare(b.date) || a.developer.localeCompare(b.developer))
 
   for (const row of allRows) {
-    const excelRow = detail.addRow(row)
+    const { _revisionCount, ...rowData } = row
+    const excelRow = detail.addRow(rowData)
+
     // Color capitalizable column
     const capCell = excelRow.getCell('cap')
     if (capCell.value === 'Yes') {
@@ -153,9 +212,19 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
     } else {
       capCell.font = { color: { argb: 'FF6B7280' } }
     }
+
+    // Highlight revised entries in light blue
+    if (_revisionCount > 0) {
+      excelRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = revisionHighlight as ExcelJS.Fill
+      })
+    }
   }
 
   detail.getColumn('hours').numFmt = '0.00'
+  detail.getColumn('hoursRaw').numFmt = '0.00'
+  detail.getColumn('adjFactor').numFmt = '0.000'
+  detail.getColumn('hoursEst').numFmt = '0.00'
 
   // --- Sheet 3: Capitalization ---
   const capSheet = workbook.addWorksheet('Capitalization')

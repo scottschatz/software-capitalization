@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateAgent } from '@/lib/agent-auth'
-import { generateEntriesForDate } from '@/lib/jobs/generate-daily-entries'
+import { generateEntriesForDate, generateWithGapDetection } from '@/lib/jobs/generate-daily-entries'
 import { addDays, format, parseISO } from 'date-fns'
 import { z } from 'zod'
 
 const batchSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  backfillGaps: z.boolean().optional(),
 })
 
 // POST /api/agent/entries/generate-batch — Generate AI entries for a date range
+// Pass { backfillGaps: true } to also check last 7 days for missed dates after processing.
 export async function POST(request: NextRequest) {
   const auth = await authenticateAgent(request)
   if (!auth) {
@@ -26,7 +28,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid input. Required: { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }' }, { status: 400 })
   }
 
-  const { from, to } = parsed.data
+  const { from, to, backfillGaps } = parsed.data
+
+  // When from===to (single day) and backfillGaps is set, use gap-aware generation
+  if (backfillGaps && from === to) {
+    const result = await generateWithGapDetection()
+    return NextResponse.json({
+      summary: {
+        from,
+        to,
+        daysProcessed: 1 + result.backfilled.length,
+        totalEntriesCreated: result.primary.entriesCreated + result.backfilled.reduce((s, b) => s + b.entriesCreated, 0),
+        totalErrors: result.primary.errors.length + result.backfilled.reduce((s, b) => s + b.errors.length, 0),
+        gapsDetected: result.backfilled.length,
+      },
+      details: [result.primary, ...result.backfilled].filter(r => r.entriesCreated > 0 || r.errors.length > 0),
+    })
+  }
+
   const startDate = parseISO(from)
   const endDate = parseISO(to)
 

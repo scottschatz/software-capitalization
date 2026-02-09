@@ -13,6 +13,7 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
   // Determine date range
   let from: string
   let to: string
+  let backfillGaps = false
 
   if (options.from && options.to) {
     from = options.from
@@ -21,10 +22,11 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
     from = options.date
     to = options.date
   } else {
-    // Default: yesterday
+    // Default: yesterday + gap detection for last 7 days
     const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd')
     from = yesterday
     to = yesterday
+    backfillGaps = true
   }
 
   console.log(`\n  Cap Agent Generate`)
@@ -38,7 +40,7 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
         Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from, to }),
+      body: JSON.stringify({ from, to, ...(backfillGaps ? { backfillGaps: true } : {}) }),
     })
 
     if (!res.ok) {
@@ -49,13 +51,16 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
     }
 
     const result = await res.json() as {
-      summary: { daysProcessed: number; totalEntriesCreated: number; totalErrors: number }
+      summary: { daysProcessed: number; totalEntriesCreated: number; totalErrors: number; gapsDetected?: number }
       details: Array<{ date: string; entriesCreated: number; errors: string[] }>
     }
 
     console.log(`  Done!`)
     console.log(`    Days processed: ${result.summary.daysProcessed}`)
     console.log(`    Entries created: ${result.summary.totalEntriesCreated}`)
+    if (result.summary.gapsDetected) {
+      console.log(`    Gaps backfilled: ${result.summary.gapsDetected}`)
+    }
 
     if (result.summary.totalErrors > 0) {
       console.log(`    Errors: ${result.summary.totalErrors}`)

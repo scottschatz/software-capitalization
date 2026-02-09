@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const result = await directPhaseChange(id, parsed.data, developer.id, developer.email)
+    const result = await directPhaseChange(id, parsed.data, developer.id, developer.role)
     return NextResponse.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Phase change failed'

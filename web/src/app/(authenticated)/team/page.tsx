@@ -27,7 +27,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { KeyRound, RefreshCw, UserX, UserCheck } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { KeyRound, RefreshCw, UserX, UserCheck, UserPlus } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface AgentKey {
   id: string
@@ -63,6 +66,12 @@ export default function TeamPage() {
     description: string
     action: () => Promise<void>
   }>({ open: false, title: '', description: '', action: async () => {} })
+  const [addDialog, setAddDialog] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newRole, setNewRole] = useState('developer')
+  const [addingDev, setAddingDev] = useState(false)
+  const [addError, setAddError] = useState('')
 
   const loadDevelopers = useCallback(async () => {
     setLoading(true)
@@ -90,7 +99,7 @@ export default function TeamPage() {
       )
     } else {
       const err = await res.json()
-      alert(err.error || 'Failed to update role')
+      toast.error(err.error || 'Failed to update role')
     }
   }
 
@@ -108,7 +117,7 @@ export default function TeamPage() {
         )
       } else {
         const err = await res.json()
-        alert(err.error || 'Failed to update status')
+        toast.error(err.error || 'Failed to update status')
       }
       setConfirmDialog((prev) => ({ ...prev, open: false }))
     }
@@ -134,6 +143,44 @@ export default function TeamPage() {
         )
       )
     }
+  }
+
+  async function handleAddDeveloper() {
+    setAddError('')
+    setAddingDev(true)
+    try {
+      const res = await fetch('/api/admin/developers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: newEmail, displayName: newName, role: newRole }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        setAddError(err.error || 'Failed to add developer')
+        return
+      }
+      setAddDialog(false)
+      toast.success('Developer added successfully')
+      setNewEmail('')
+      setNewName('')
+      setNewRole('developer')
+      loadDevelopers()
+    } finally {
+      setAddingDev(false)
+    }
+  }
+
+  // Auto-fill display name from email
+  function handleEmailChange(email: string) {
+    setNewEmail(email)
+    if (!newName || newName === emailToName(newEmail)) {
+      setNewName(emailToName(email))
+    }
+  }
+
+  function emailToName(email: string): string {
+    const local = email.split('@')[0] ?? ''
+    return local.split('.').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
   }
 
   function formatRelative(date: string | null) {
@@ -198,10 +245,16 @@ export default function TeamPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Developers</CardTitle>
-          <Button variant="outline" size="sm" onClick={loadDevelopers} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="default" size="sm" onClick={() => setAddDialog(true)}>
+              <UserPlus className="h-4 w-4 mr-1" />
+              Add Developer
+            </Button>
+            <Button variant="outline" size="sm" onClick={loadDevelopers} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -327,6 +380,65 @@ export default function TeamPage() {
               Cancel
             </Button>
             <Button onClick={confirmDialog.action}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Developer Dialog */}
+      <Dialog open={addDialog} onOpenChange={setAddDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Developer</DialogTitle>
+            <DialogDescription>
+              Pre-provision a developer account. They&apos;ll be ready to go when they sign in via SSO.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="add-email">Email</Label>
+              <Input
+                id="add-email"
+                placeholder="first.last@townsquaremedia.com"
+                value={newEmail}
+                onChange={(e) => handleEmailChange(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-name">Display Name</Label>
+              <Input
+                id="add-name"
+                placeholder="First Last"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-role">Role</Label>
+              <Select value={newRole} onValueChange={setNewRole}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="developer">Developer</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {addError && (
+              <p className="text-sm text-destructive">{addError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddDeveloper}
+              disabled={addingDev || !newEmail || !newName}
+            >
+              {addingDev ? 'Adding...' : 'Add Developer'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

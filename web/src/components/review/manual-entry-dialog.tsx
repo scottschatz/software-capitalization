@@ -71,7 +71,12 @@ export function ManualEntryDialog({ date, projects }: ManualEntryDialogProps) {
       return
     }
 
-    toast.success('Manual entry created')
+    const result = await res.json()
+    if (result.status === 'pending_approval') {
+      toast.info('Manual entry created — pending manager approval (>2h)')
+    } else {
+      toast.success('Manual entry created')
+    }
     setOpen(false)
     setProjectId('')
     setHours('1')

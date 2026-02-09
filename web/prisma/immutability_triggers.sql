@@ -69,3 +69,21 @@ DROP TRIGGER IF EXISTS daily_entry_revisions_immutable ON daily_entry_revisions;
 CREATE TRIGGER daily_entry_revisions_immutable
   BEFORE UPDATE OR DELETE ON daily_entry_revisions
   FOR EACH ROW EXECUTE FUNCTION prevent_raw_modification();
+
+-- daily_entries: prevent DELETE (entries may be updated through workflow, but never deleted)
+DROP TRIGGER IF EXISTS daily_entries_no_delete ON daily_entries;
+CREATE TRIGGER daily_entries_no_delete
+  BEFORE DELETE ON daily_entries
+  FOR EACH ROW EXECUTE FUNCTION prevent_raw_modification();
+
+-- manual_entries: prevent DELETE (entries may be updated through workflow, but never deleted)
+DROP TRIGGER IF EXISTS manual_entries_no_delete ON manual_entries;
+CREATE TRIGGER manual_entries_no_delete
+  BEFORE DELETE ON manual_entries
+  FOR EACH ROW EXECUTE FUNCTION prevent_raw_modification();
+
+-- manual_entry_revisions: append-only audit log
+DROP TRIGGER IF EXISTS manual_entry_revisions_immutable ON manual_entry_revisions;
+CREATE TRIGGER manual_entry_revisions_immutable
+  BEFORE UPDATE OR DELETE ON manual_entry_revisions
+  FOR EACH ROW EXECUTE FUNCTION prevent_raw_modification();

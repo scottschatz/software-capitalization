@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authenticateAgent } from '@/lib/agent-auth'
 import { prisma } from '@/lib/prisma'
 import { z } from 'zod'
+import { MANUAL_ENTRY_AUTO_APPROVE_THRESHOLD } from '@/lib/constants'
 
 const manualEntrySchema = z.object({
   projectName: z.string().min(1),
@@ -56,6 +57,8 @@ export async function POST(request: NextRequest) {
   // Normalize to date only (strip time)
   const dateOnly = new Date(date.toISOString().split('T')[0])
 
+  const status = data.hours <= MANUAL_ENTRY_AUTO_APPROVE_THRESHOLD ? 'confirmed' : 'pending_approval'
+
   const entry = await prisma.manualEntry.create({
     data: {
       developerId: developer.id,
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
       hours: data.hours,
       phase: data.phase ?? project.phase,
       description: data.description,
+      status,
     },
   })
 
@@ -74,5 +78,6 @@ export async function POST(request: NextRequest) {
     phase: entry.phase,
     date: dateOnly.toISOString().split('T')[0],
     description: entry.description,
+    status: entry.status,
   }, { status: 201 })
 }

@@ -5,7 +5,7 @@ import { approvePhaseChange } from '@/lib/actions/project-actions'
 
 type RouteParams = { params: Promise<{ id: string; requestId: string }> }
 
-// POST /api/projects/[id]/phase-change/[requestId]/approve — Approve (admin only, scott.schatz@townsquaremedia.com)
+// POST /api/projects/[id]/phase-change/[requestId]/approve — Approve (admin or manager role required)
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       requestId,
       parsed.data,
       developer.id,
-      developer.email
+      developer.role
     )
     return NextResponse.json(result)
   } catch (err) {

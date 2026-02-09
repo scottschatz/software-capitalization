@@ -17,6 +17,15 @@ import {
 import { EntryCard } from '@/components/review/entry-card'
 import { ConfirmAllButton } from '@/components/review/confirm-all-button'
 import { ManualEntryDialog } from '@/components/review/manual-entry-dialog'
+import { AdjustmentFactorInline } from '@/components/review/adjustment-factor-inline'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import {
   CheckCircle,
@@ -35,10 +44,36 @@ interface Project {
   phase: string
 }
 
-interface SerializedEntry {
+interface SourceSession {
+  sessionId: string
+  projectPath?: string
+  durationMinutes?: number | null
+  activeMinutes?: number | null
+  messageCount?: number
+  toolUseCount?: number
+  userPromptCount?: number | null
+  firstUserPrompt?: string | null
+  model?: string | null
+  hookEventCount?: number
+  isMultiDay?: boolean
+}
+
+interface SourceCommit {
+  commitHash: string
+  repoPath?: string
+  message?: string
+  filesChanged?: number
+  insertions?: number
+  deletions?: number
+  committedAt?: string
+}
+
+export interface SerializedEntry {
   id: string
   date: string // ISO string
   hoursEstimated: number | null
+  hoursRaw: number | null
+  adjustmentFactor: number | null
   phaseAuto: string | null
   descriptionAuto: string | null
   hoursConfirmed: number | null
@@ -46,10 +81,17 @@ interface SerializedEntry {
   descriptionConfirmed: string | null
   confirmedAt: string | null
   adjustmentReason: string | null
+  modelUsed: string | null
+  modelFallback: boolean
+  workType: string | null
+  confidenceScore: number | null
+  outlierFlag: string | null
   status: string
   sourceSessionIds: string[]
   sourceCommitIds: string[]
   project: Project | null
+  sourceSessions?: SourceSession[]
+  sourceCommits?: SourceCommit[]
 }
 
 interface SerializedManualEntry {
@@ -59,6 +101,7 @@ interface SerializedManualEntry {
   phase: string
   description: string
   project: Project | null
+  status: string
 }
 
 interface DayGroup {
@@ -78,6 +121,7 @@ interface ReviewPageClientProps {
   projects: Project[]
   showAll: boolean
   availableMonths: string[]
+  adjustmentFactor?: number
 }
 
 function formatMonthLabel(monthStr: string): string {
@@ -91,12 +135,14 @@ export function ReviewPageClient({
   projects,
   showAll: initialShowAll,
   availableMonths,
+  adjustmentFactor: _adjustmentFactor,
 }: ReviewPageClientProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [showAll, setShowAll] = useState(initialShowAll)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [confirmingAll, setConfirmingAll] = useState(false)
+  const [showConfirmAllDialog, setShowConfirmAllDialog] = useState(false)
   const [initialLoad, setInitialLoad] = useState(true)
 
   // Determine active filter from URL
@@ -150,12 +196,13 @@ export function ReviewPageClient({
         }
       })
 
-    // Auto-expand days with pending entries on initial load
+    // Auto-expand days with pending entries on initial load (limit to 3 most recent to reduce lag)
     if (initialLoad && days.length > 0) {
-      const pendingDays = new Set(days.filter((d) => d.pendingCount > 0).map((d) => d.dateStr))
+      const pendingDayStrs = days.filter((d) => d.pendingCount > 0).map((d) => d.dateStr)
+      const autoExpand = new Set(pendingDayStrs.slice(0, 3))
       // If no pending days but showing all, expand the first day
-      if (pendingDays.size === 0 && days.length > 0) pendingDays.add(days[0].dateStr)
-      setExpandedDays(pendingDays)
+      if (autoExpand.size === 0 && days.length > 0) autoExpand.add(days[0].dateStr)
+      setExpandedDays(autoExpand)
       setInitialLoad(false)
     }
 
@@ -296,7 +343,7 @@ export function ReviewPageClient({
           )}
           <div className="flex items-center gap-2">
             <Label htmlFor="show-all" className="text-sm cursor-pointer">
-              Show confirmed
+              Show history
             </Label>
             <Switch
               id="show-all"
@@ -350,13 +397,18 @@ export function ReviewPageClient({
         </div>
       </div>
 
+      {/* Adjustment factor */}
+      {_adjustmentFactor != null && (
+        <AdjustmentFactorInline initialFactor={_adjustmentFactor} />
+      )}
+
       {/* Toolbar: confirm all + expand/collapse */}
       {dayGroups.length > 0 && (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             {totalPending > 0 && (
               <Button
-                onClick={handleConfirmAllRange}
+                onClick={() => setShowConfirmAllDialog(true)}
                 disabled={confirmingAll}
               >
                 {confirmingAll ? (
@@ -404,7 +456,7 @@ export function ReviewPageClient({
             <p className="text-muted-foreground mt-1">
               {showAll
                 ? 'No entries found for this period.'
-                : 'No pending entries to review. Toggle "Show confirmed" to see past entries.'}
+                : 'No pending entries to review. Toggle "Show history" to see past entries.'}
             </p>
           </CardContent>
         </Card>
@@ -487,6 +539,18 @@ export function ReviewPageClient({
                               <div className="flex items-center justify-between">
                                 <span className="font-medium text-sm">{me.project?.name}</span>
                                 <div className="flex items-center gap-2">
+                                  {me.status === 'pending_approval' && (
+                                    <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs">Pending Approval</Badge>
+                                  )}
+                                  {me.status === 'approved' && (
+                                    <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">Approved</Badge>
+                                  )}
+                                  {me.status === 'confirmed' && (
+                                    <Badge variant="secondary" className="text-xs">Confirmed</Badge>
+                                  )}
+                                  {me.status === 'rejected' && (
+                                    <Badge className="bg-red-100 text-red-800 border-red-200 text-xs">Rejected</Badge>
+                                  )}
                                   <Badge variant="outline" className="text-xs">
                                     {me.phase === 'application_development'
                                       ? 'App Dev'
@@ -510,6 +574,69 @@ export function ReviewPageClient({
           })}
         </div>
       )}
+
+      {/* Confirm All Pending dialog */}
+      <Dialog open={showConfirmAllDialog} onOpenChange={setShowConfirmAllDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm All {totalPending} Pending Entries?</DialogTitle>
+            <DialogDescription>
+              This will accept AI-suggested values for all pending entries across{' '}
+              {pendingDates.length} day{pendingDates.length !== 1 ? 's' : ''}. Bulk-confirmed
+              entries are marked as &quot;bulk_range&quot; in the audit trail.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowConfirmAllDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowConfirmAllDialog(false)
+                handleConfirmAllRange()
+              }}
+            >
+              <CheckCircle className="h-4 w-4 mr-1" />
+              Confirm All
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ASC 350-40 methodology explanation */}
+      <details className="text-sm mt-6">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
+          How are hours estimated? (Methodology)
+        </summary>
+        <div className="mt-2 space-y-2 text-muted-foreground pl-4 border-l-2">
+          <p>
+            <strong>Active Time Calculation:</strong> AI estimates are based on gap-aware active
+            time from your Claude Code sessions. Only intervals where the gap between messages is
+            less than 15 minutes are counted as active work. Gaps exceeding 15 minutes are treated
+            as breaks or idle time and excluded. This prevents wall-clock time from inflating
+            capitalizable hours.
+          </p>
+          <p>
+            <strong>Adjustment Factor:</strong> A per-developer multiplier (default 100%) is
+            applied to the AI&apos;s raw estimate. Factors above 125% require manager/admin
+            authorization. The maximum is 150%. Both the raw estimate and factor are stored for
+            audit purposes.
+          </p>
+          <p>
+            <strong>Confirmation & Audit Trail:</strong> Every entry must be reviewed and confirmed
+            by the developer. Changes exceeding 20% from the AI estimate require a written
+            justification. All modifications are logged in the revision history with old/new values,
+            who changed it, and when.
+          </p>
+          <p>
+            <strong>Phase Classification:</strong> Under ASC 350-40, only hours in the{' '}
+            <strong>Application Development</strong> phase are capitalizable. Phase is determined by
+            the project&apos;s current lifecycle stage, not by the AI. Phase transitions require
+            admin/manager approval. ASU 2025-06 additionally requires documented management
+            authorization before capitalization can begin.
+          </p>
+        </div>
+      </details>
     </div>
   )
 }

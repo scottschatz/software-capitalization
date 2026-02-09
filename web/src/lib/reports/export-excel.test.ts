@@ -13,11 +13,22 @@ function makeDailyEntry(overrides: Partial<DailyEntryRow> = {}): DailyEntryRow {
     projectPhase: 'application_development',
     hoursEstimated: 4,
     hoursConfirmed: 3.5,
+    hoursRaw: null,
+    adjustmentFactor: null,
+    adjustmentReason: null,
+    modelUsed: null,
+    modelFallback: false,
+    workType: null,
+    confirmedBy: null,
+    confirmationMethod: null,
+    revisionCount: 0,
+    projectAuthorized: true,
     phaseConfirmed: 'application_development',
     descriptionConfirmed: 'Built feature X',
     status: 'confirmed',
     capitalizable: true,
     confirmedAt: new Date('2026-01-16'),
+    requiresManagerApproval: false,
     ...overrides,
   }
 }
@@ -33,6 +44,9 @@ function makeManualEntry(overrides: Partial<ManualEntryRow> = {}): ManualEntryRo
     phase: 'preliminary',
     description: 'Research task',
     capitalizable: false,
+    status: 'confirmed',
+    approvedBy: null,
+    approvedAt: null,
     ...overrides,
   }
 }
@@ -109,17 +123,18 @@ describe('buildExcelReport', () => {
     })
     const wb = await parseWorkbook(buffer)
     const sheet = wb.getWorksheet('Detail')!
-    // Header + 2 entries = 3 rows
-    expect(sheet.rowCount).toBe(3)
+    // Legend row + Header + 2 entries = 4 rows
+    expect(sheet.rowCount).toBe(4)
 
     // Both entries are same date, so sorted by developer name (Alice < Bob)
-    const row2 = sheet.getRow(2)
-    expect(row2.getCell(2).value).toBe('Alice')
-    expect(row2.getCell(6).value).toBe('AI-Generated')
-
+    // Row 1 = legend, Row 2 = headers, data starts at row 3
     const row3 = sheet.getRow(3)
-    expect(row3.getCell(2).value).toBe('Bob')
-    expect(row3.getCell(6).value).toBe('Manual')
+    expect(row3.getCell(2).value).toBe('Alice')
+    expect(row3.getCell(7).value).toBe('AI-Generated')
+
+    const row4 = sheet.getRow(4)
+    expect(row4.getCell(2).value).toBe('Bob')
+    expect(row4.getCell(7).value).toBe('Manual')
   })
 
   it('should populate Capitalization sheet with percentages', async () => {
@@ -172,7 +187,8 @@ describe('buildExcelReport', () => {
     })
     const wb = await parseWorkbook(buffer)
     const sheet = wb.getWorksheet('Detail')!
-    expect(sheet.getRow(2).getCell(5).value).toBe('Application Development')
-    expect(sheet.getRow(3).getCell(5).value).toBe('Post-Implementation')
+    // Row 1 = legend, Row 2 = headers, data starts at row 3
+    expect(sheet.getRow(3).getCell(5).value).toBe('Application Development')
+    expect(sheet.getRow(4).getCell(5).value).toBe('Post-Implementation')
   })
 })

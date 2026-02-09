@@ -1,7 +1,9 @@
 import { prisma } from '@/lib/prisma'
 import { generateDailyEntries } from '@/lib/ai/generate-entries'
+import { classifyWorkType, type ClassificationInput } from '@/lib/ai/classify-work-type'
+import { crossValidateEntry } from '@/lib/ai/cross-validate'
 import type { DailyActivityContext } from '@/lib/ai/prompts'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 
 // Day boundaries use Eastern time so "Feb 6" means midnight-to-midnight ET.
 // This matches the agent-side JSONL parser's dailyBreakdown dates.
@@ -62,7 +64,9 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
   errors: string[]
 }> {
   const date = targetDate ?? subDays(new Date(), 1)
-  const dateStr = format(date, 'yyyy-MM-dd')
+  // Use company timezone for date string — critical: format() uses local timezone
+  // which can shift the date when callers pass UTC-midnight dates (new Date('YYYY-MM-DD')).
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: DAY_TZ }).format(date)
   const { startOfDay, endOfDay } = getLocalDayBounds(dateStr)
 
   const errors: string[] = []
@@ -71,12 +75,12 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
   // Get all active developers who have synced data
   const developers = await prisma.developer.findMany({
     where: { active: true },
-    select: { id: true, email: true, displayName: true },
+    select: { id: true, email: true, displayName: true, adjustmentFactor: true },
   })
 
   // Get all monitored, non-abandoned projects with repos, claude paths, and lifecycle fields
   const projects = await prisma.project.findMany({
-    where: { status: { not: 'abandoned' }, monitored: true },
+    where: { status: { notIn: ['abandoned', 'suspended'] }, monitored: true },
     include: {
       repos: { select: { repoPath: true } },
       claudePaths: { select: { claudePath: true, localPath: true } },
@@ -159,7 +163,7 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       orderBy: { timestamp: 'asc' },
     })
 
-    // Skip if no activity
+    // Skip if no activity at all for this date
     if (sessions.length === 0 && commits.length === 0 && toolEvents.length === 0) continue
 
     // For multi-day sessions, extract the per-day breakdown for the target date.
@@ -177,7 +181,22 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       userPrompts?: Array<{ time: string; text: string }>
     }
 
-    const mappedSessions = sessions.map((s) => {
+    // Filter sessions: if dailyBreakdown exists, only include sessions that had
+    // actual activity on this date. Without this filter, a 9-day session with 17k
+    // messages would show all messages for a date where it had 0 activity, causing
+    // the AI to massively overestimate hours.
+    const filteredSessions = sessions.filter((s) => {
+      const breakdown = s.dailyBreakdown as DailyBreakdownEntry[] | null
+      if (!breakdown || breakdown.length === 0) {
+        // No dailyBreakdown data (older sessions) — include based on time overlap
+        return true
+      }
+      const dayData = breakdown.find((d) => d.date === dateStr)
+      // Exclude if breakdown exists but this date has no entry or 0 activity
+      return dayData != null && ((dayData.messageCount ?? 0) > 0 || (dayData.activeMinutes ?? 0) > 0)
+    })
+
+    const mappedSessions = filteredSessions.map((s) => {
       const breakdown = s.dailyBreakdown as DailyBreakdownEntry[] | null
       const dayData = breakdown?.find((d) => d.date === dateStr)
 
@@ -211,6 +230,9 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       }
     })
 
+    // After filtering, skip if no sessions with actual activity remain (and no commits/toolEvents)
+    if (mappedSessions.length === 0 && commits.length === 0 && toolEvents.length === 0) continue
+
     const ctx: DailyActivityContext = {
       developer: { displayName: developer.displayName, email: developer.email },
       date: dateStr,
@@ -243,39 +265,185 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       })),
     }
 
-    try {
-      const aiEntries = await generateDailyEntries(ctx)
+    // Query last 30 days of confirmed entries for historical context + cross-validation
+    const recentEntries = await prisma.dailyEntry.findMany({
+      where: {
+        developerId: developer.id,
+        status: 'confirmed',
+        date: { gte: subDays(new Date(), 30) },
+      },
+      select: { date: true, hoursConfirmed: true, projectId: true },
+    })
 
-      for (const entry of aiEntries) {
-        // Collect source IDs for sessions matching this project
+    const confirmedDays = new Set(recentEntries.map(e => e.date.toISOString().slice(0, 10))).size
+    const totalHours = recentEntries.reduce((sum, e) => sum + (e.hoursConfirmed ?? 0), 0)
+    const avgHoursPerDay = confirmedDays > 0 ? totalHours / confirmedDays : 0
+    const projectsByDay = new Map<string, Set<string>>()
+    for (const e of recentEntries) {
+      const d = e.date.toISOString().slice(0, 10)
+      if (!projectsByDay.has(d)) projectsByDay.set(d, new Set())
+      if (e.projectId) projectsByDay.get(d)!.add(e.projectId)
+    }
+    const avgProjectsPerDay = confirmedDays > 0
+      ? [...projectsByDay.values()].reduce((s, ps) => s + ps.size, 0) / confirmedDays
+      : 0
+
+    const historicalStats = confirmedDays > 0
+      ? { avgHoursPerDay, avgProjectsPerDay, confirmedDays, periodDays: 30 }
+      : undefined
+
+    try {
+      const { entries: aiEntries, modelUsed, fallback: modelFallback } = await generateDailyEntries(ctx, historicalStats)
+
+      // --- Feature H: Classify work types (parallel, async) ---
+      // Build classification inputs from session/commit data matched to each AI entry
+      const classificationInputs: ClassificationInput[] = aiEntries.map((entry) => {
         const matchingProject = projects.find((p) => p.id === entry.projectId)
         const projectClaudePaths = matchingProject?.claudePaths.map((c) => c.claudePath) ?? []
         const projectRepoPaths = matchingProject?.repos.map((r) => r.repoPath) ?? []
 
-        const sourceSessionIds = sessions
+        // Aggregate tool breakdowns from sessions matched to this entry
+        const matchedSessions = mappedSessions.filter((s) =>
+          projectClaudePaths.includes(s.projectPath)
+        )
+        const aggregateToolBreakdown: Record<string, number> = {}
+        for (const s of matchedSessions) {
+          if (s.toolBreakdown) {
+            for (const [tool, count] of Object.entries(s.toolBreakdown)) {
+              aggregateToolBreakdown[tool] = (aggregateToolBreakdown[tool] ?? 0) + count
+            }
+          }
+        }
+
+        // Collect files referenced from matched sessions
+        const filesReferenced = matchedSessions.flatMap((s) => s.filesReferenced)
+
+        // Collect user prompt samples from matched sessions
+        const userPromptSamples = matchedSessions.flatMap((s) =>
+          s.userPrompts?.map((p) => p.text) ?? s.userPromptSamples ?? []
+        )
+
+        // Collect commit messages for matched repos
+        const commitMessages = commits
+          .filter((c) => projectRepoPaths.includes(c.repoPath))
+          .map((c) => c.message)
+
+        return {
+          toolBreakdown: Object.keys(aggregateToolBreakdown).length > 0 ? aggregateToolBreakdown : null,
+          filesReferenced,
+          userPromptSamples,
+          commitMessages,
+          summary: entry.summary,
+        }
+      })
+
+      const classifications = await Promise.all(
+        classificationInputs.map((input) => classifyWorkType(input))
+      )
+
+      // --- Feature G: Cross-validate entries (synchronous, pure computation) ---
+      const validations = aiEntries.map((entry) =>
+        crossValidateEntry({
+          hoursEstimate: entry.hoursEstimate,
+          projectId: entry.projectId,
+          projectName: entry.projectName,
+          historicalEntries: recentEntries,
+        })
+      )
+
+      const adjFactor = developer.adjustmentFactor
+
+      for (let i = 0; i < aiEntries.length; i++) {
+        const entry = aiEntries[i]
+        const classification = classifications[i]
+        const validation = validations[i]
+        // Look up the matched project from DB — this is the source of truth for phase
+        const matchingProject = projects.find((p) => p.id === entry.projectId)
+
+        // --- Unmatched entries: flag for categorization instead of creating a normal entry ---
+        if (!matchingProject || !entry.projectId) {
+          // AI found activity for an unmonitored/unmatched repo.
+          // Create a flagged entry so the developer can assign it to a project or dismiss it.
+          const sourceCommitIds = commits
+            .filter((c) => entry.projectName.includes(c.repoPath.split('/').pop() ?? ''))
+            .map((c) => c.id)
+
+          await prisma.dailyEntry.create({
+            data: {
+              developerId: developer.id,
+              date: startOfDay,
+              projectId: null,
+              hoursRaw: entry.hoursEstimate,
+              adjustmentFactor: adjFactor,
+              hoursEstimated: Math.round(entry.hoursEstimate * adjFactor * 100) / 100,
+              phaseAuto: null,
+              descriptionAuto: `⚠️ Unmatched Project: ${entry.projectName}\n\n${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}\n\nAction needed: Assign to an existing project, create a new project, or dismiss.`,
+              confidenceScore: entry.confidence,
+              modelUsed,
+              modelFallback,
+              sourceSessionIds: [],
+              sourceCommitIds,
+              status: 'flagged', // always flagged for unmatched
+              workType: classification?.workType ?? null,
+              outlierFlag: validation?.flag ?? null,
+            },
+          })
+          entriesCreated++
+          continue
+        }
+
+        // --- Matched entries: server derives phase and capitalizability from project record ---
+        const projectClaudePaths = matchingProject.claudePaths.map((c) => c.claudePath)
+        const projectRepoPaths = matchingProject.repos.map((r) => r.repoPath)
+
+        const sourceSessionIds = filteredSessions
           .filter((s) => projectClaudePaths.includes(s.projectPath))
           .map((s) => s.id)
         const sourceCommitIds = commits
           .filter((c) => projectRepoPaths.includes(c.repoPath))
           .map((c) => c.id)
 
-        // Flag entries where AI detected enhancement work on post-impl projects
-        const status = entry.enhancementSuggested ? 'flagged' : 'pending'
-        const enhancementNote = entry.enhancementSuggested && entry.enhancementReason
-          ? `\n\n⚠️ Enhancement Suggested: ${entry.enhancementReason}`
-          : ''
+        // Phase comes from the project record, not the AI
+        const projectPhase = matchingProject.phase
+
+        // Enhancement detection: AI suggests new feature work on a post-impl project
+        let status: string = 'pending'
+        let enhancementNote = ''
+        if (entry.enhancementSuggested && entry.enhancementReason) {
+          status = 'flagged'
+          enhancementNote = `\n\n⚠️ Enhancement Suggested: ${entry.enhancementReason}`
+        } else if (
+          projectPhase === 'post_implementation' &&
+          entry.phaseSuggestion === 'application_development'
+        ) {
+          // AI thinks this is active development on a post-impl project — auto-flag
+          status = 'flagged'
+          enhancementNote = '\n\n⚠️ Enhancement Detected: AI classified this as active development work on a post-implementation project. Consider creating an Enhancement Project.'
+        }
+
+        // Cross-validation outlier override: flag entries with anomalous hours
+        if (validation?.isOutlier && status === 'pending') {
+          status = 'flagged'
+        }
 
         await prisma.dailyEntry.create({
           data: {
             developerId: developer.id,
             date: startOfDay,
             projectId: entry.projectId,
-            hoursEstimated: entry.hoursEstimate,
-            phaseAuto: entry.phase,
+            hoursRaw: entry.hoursEstimate,
+            adjustmentFactor: adjFactor,
+            hoursEstimated: Math.round(entry.hoursEstimate * adjFactor * 100) / 100,
+            phaseAuto: projectPhase, // from project record, not AI
             descriptionAuto: `${entry.summary}\n\n---\nConfidence: ${(entry.confidence * 100).toFixed(0)}%\nReasoning: ${entry.reasoning}${enhancementNote}`,
+            confidenceScore: entry.confidence,
+            modelUsed,
+            modelFallback,
             sourceSessionIds,
             sourceCommitIds,
             status,
+            workType: classification?.workType ?? null,
+            outlierFlag: validation?.flag ?? null,
           },
         })
         entriesCreated++
@@ -293,4 +461,70 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
     entriesCreated,
     errors,
   }
+}
+
+/**
+ * Generate entries for yesterday, then backfill any missed dates in the last 7 days.
+ * Checks for dates that have raw session activity but no daily entries.
+ * Used by the daily cron/systemd timer to self-heal gaps.
+ */
+export async function generateWithGapDetection(): Promise<{
+  primary: { date: string; entriesCreated: number; errors: string[] }
+  backfilled: Array<{ date: string; entriesCreated: number; errors: string[] }>
+}> {
+  // Step 1: Generate for yesterday (normal daily run)
+  const primary = await generateEntriesForDate()
+
+  // Step 2: Check last 7 days for gaps
+  const backfilled: Array<{ date: string; entriesCreated: number; errors: string[] }> = []
+  const now = new Date()
+  const lookbackDays = 7
+
+  for (let i = 2; i <= lookbackDays; i++) {
+    const checkDate = subDays(now, i)
+    const checkStr = new Intl.DateTimeFormat('en-CA', { timeZone: DAY_TZ }).format(checkDate)
+    const { startOfDay, endOfDay } = getLocalDayBounds(checkStr)
+
+    // Check if any entries exist for this date (any developer)
+    const entryCount = await prisma.dailyEntry.count({
+      where: { date: startOfDay },
+    })
+    if (entryCount > 0) continue
+
+    // Check if there's raw activity (sessions overlapping this date)
+    const sessionCount = await prisma.rawSession.count({
+      where: {
+        startedAt: { lte: endOfDay },
+        OR: [
+          { endedAt: { gte: startOfDay } },
+          { endedAt: null, startedAt: { gte: startOfDay } },
+        ],
+      },
+    })
+    const commitCount = await prisma.rawCommit.count({
+      where: { committedAt: { gte: startOfDay, lte: endOfDay } },
+    })
+
+    if (sessionCount === 0 && commitCount === 0) continue
+
+    // Gap detected: generate entries for this date
+    console.log(`[gap-detection] Missing entries for ${checkStr} (${sessionCount} sessions, ${commitCount} commits) — generating...`)
+    try {
+      const result = await generateEntriesForDate(checkDate)
+      backfilled.push({
+        date: result.date,
+        entriesCreated: result.entriesCreated,
+        errors: result.errors,
+      })
+    } catch (err) {
+      console.error(`[gap-detection] Failed for ${checkStr}:`, err)
+      backfilled.push({
+        date: checkStr,
+        entriesCreated: 0,
+        errors: [err instanceof Error ? err.message : String(err)],
+      })
+    }
+  }
+
+  return { primary, backfilled }
 }

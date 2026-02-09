@@ -32,11 +32,12 @@ export async function GET(request: NextRequest) {
     orderBy: { date: 'asc' },
   })
 
-  // Also get manual entries
+  // Also get manual entries (only confirmed or approved)
   const manualEntries = await prisma.manualEntry.findMany({
     where: {
       developerId: developer.id,
       date: { gte: fromDate, lte: toDate },
+      status: { in: ['confirmed', 'approved'] },
       ...(projectName ? { project: { name: { contains: projectName, mode: 'insensitive' as const } } } : {}),
     },
     include: {

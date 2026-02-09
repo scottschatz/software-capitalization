@@ -6,7 +6,8 @@ export interface ReportFilters {
   endDate: string   // YYYY-MM-DD
   developerId?: string
   projectId?: string
-  status?: 'confirmed' | 'pending' | 'flagged' | 'disputed'
+  status?: 'confirmed' | 'pending' | 'flagged' | 'disputed' | 'approved'
+  statuses?: string[]
 }
 
 export interface DailyEntryRow {
@@ -18,11 +19,22 @@ export interface DailyEntryRow {
   projectPhase: string | null
   hoursEstimated: number | null
   hoursConfirmed: number | null
+  hoursRaw: number | null
+  adjustmentFactor: number | null
+  adjustmentReason: string | null
+  modelUsed: string | null
+  modelFallback: boolean
+  confirmedBy: string | null
+  confirmationMethod: string | null
+  revisionCount: number
   phaseConfirmed: string | null
   descriptionConfirmed: string | null
+  workType: string | null
   status: string
   capitalizable: boolean
+  projectAuthorized: boolean
   confirmedAt: Date | null
+  requiresManagerApproval: boolean
 }
 
 export interface ManualEntryRow {
@@ -35,6 +47,9 @@ export interface ManualEntryRow {
   phase: string
   description: string
   capitalizable: boolean
+  status: string
+  approvedBy: string | null
+  approvedAt: Date | null
 }
 
 /**
@@ -50,33 +65,54 @@ export async function queryDailyEntries(filters: ReportFilters): Promise<DailyEn
 
   if (filters.developerId) where.developerId = filters.developerId
   if (filters.projectId) where.projectId = filters.projectId
-  if (filters.status) where.status = filters.status
+  if (filters.statuses) where.status = { in: filters.statuses }
+  else if (filters.status) where.status = filters.status
 
   const entries = await prisma.dailyEntry.findMany({
     where,
     include: {
       developer: { select: { displayName: true, email: true } },
-      project: { select: { name: true, phase: true } },
+      confirmedBy: { select: { displayName: true } },
+      project: { select: { name: true, phase: true, managementAuthorized: true, probableToComplete: true, status: true, requiresManagerApproval: true } },
+      _count: { select: { revisions: true } },
     },
     orderBy: [{ date: 'asc' }, { developer: { displayName: 'asc' } }],
   })
 
-  return entries.map((e) => ({
-    id: e.id,
-    date: e.date,
-    developerName: e.developer.displayName,
-    developerEmail: e.developer.email,
-    projectName: e.project?.name ?? null,
-    projectPhase: e.project?.phase ?? null,
-    hoursEstimated: e.hoursEstimated,
-    hoursConfirmed: e.hoursConfirmed,
-    phaseConfirmed: e.phaseConfirmed,
-    descriptionConfirmed: e.descriptionConfirmed,
-    status: e.status,
-    capitalizable: e.phaseConfirmed === 'application_development' ||
-      (!e.phaseConfirmed && e.project?.phase === 'application_development'),
-    confirmedAt: e.confirmedAt,
-  }))
+  return entries.map((e) => {
+    const phaseIsCapitalizable = e.phaseConfirmed === 'application_development' ||
+      (!e.phaseConfirmed && e.project?.phase === 'application_development')
+    // ASU 2025-06: project must be authorized and probable to complete
+    const projectAuthorized = e.project?.managementAuthorized === true && e.project?.probableToComplete === true
+    const projectActive = e.project?.status !== 'abandoned' && e.project?.status !== 'suspended'
+
+    return {
+      id: e.id,
+      date: e.date,
+      developerName: e.developer.displayName,
+      developerEmail: e.developer.email,
+      projectName: e.project?.name ?? null,
+      projectPhase: e.project?.phase ?? null,
+      hoursEstimated: e.hoursEstimated,
+      hoursConfirmed: e.hoursConfirmed,
+      hoursRaw: e.hoursRaw,
+      adjustmentFactor: e.adjustmentFactor,
+      adjustmentReason: e.adjustmentReason,
+      modelUsed: e.modelUsed,
+      modelFallback: e.modelFallback,
+      confirmedBy: e.confirmedBy?.displayName ?? null,
+      confirmationMethod: e.confirmationMethod,
+      revisionCount: e._count.revisions,
+      phaseConfirmed: e.phaseConfirmed,
+      descriptionConfirmed: e.descriptionConfirmed,
+      workType: e.workType ?? null,
+      status: e.status,
+      capitalizable: phaseIsCapitalizable && projectAuthorized && projectActive,
+      projectAuthorized,
+      confirmedAt: e.confirmedAt,
+      requiresManagerApproval: e.project?.requiresManagerApproval ?? false,
+    }
+  })
 }
 
 /**
@@ -92,35 +128,55 @@ export async function queryManualEntries(filters: ReportFilters): Promise<Manual
 
   if (filters.developerId) where.developerId = filters.developerId
   if (filters.projectId) where.projectId = filters.projectId
+  if (filters.statuses) where.status = { in: filters.statuses }
+  else if (filters.status) where.status = filters.status
 
   const entries = await prisma.manualEntry.findMany({
     where,
     include: {
       developer: { select: { displayName: true, email: true } },
-      project: { select: { name: true } },
+      project: { select: { name: true, managementAuthorized: true, probableToComplete: true, status: true } },
+      approvedBy: { select: { displayName: true } },
     },
     orderBy: [{ date: 'asc' }, { developer: { displayName: 'asc' } }],
   })
 
-  return entries.map((e) => ({
-    id: e.id,
-    date: e.date,
-    developerName: e.developer.displayName,
-    developerEmail: e.developer.email,
-    projectName: e.project.name,
-    hours: e.hours,
-    phase: e.phase,
-    description: e.description,
-    capitalizable: e.phase === 'application_development',
-  }))
+  return entries.map((e) => {
+    const projectAuthorized = e.project.managementAuthorized === true && e.project.probableToComplete === true
+    const projectActive = e.project.status !== 'abandoned' && e.project.status !== 'suspended'
+    return {
+      id: e.id,
+      date: e.date,
+      developerName: e.developer.displayName,
+      developerEmail: e.developer.email,
+      projectName: e.project.name,
+      hours: e.hours,
+      phase: e.phase,
+      description: e.description,
+      capitalizable: e.phase === 'application_development' && projectAuthorized && projectActive,
+      status: e.status,
+      approvedBy: e.approvedBy?.displayName ?? null,
+      approvedAt: e.approvedAt,
+    }
+  })
 }
 
 /**
  * Aggregate hours by project for a date range.
  */
 export async function aggregateByProject(filters: ReportFilters) {
-  const daily = await queryDailyEntries({ ...filters, status: 'confirmed' })
+  const daily = await queryDailyEntries({ ...filters, status: undefined, statuses: ['confirmed', 'approved'] })
   const manual = await queryManualEntries(filters)
+
+  // Filter: include confirmed entries, but for requiresManagerApproval projects, require approved
+  const filteredDaily = daily.filter(e => {
+    if (e.status === 'approved') return true
+    if (e.status === 'confirmed' && !e.requiresManagerApproval) return true
+    return false
+  })
+
+  // Filter manual entries: only include confirmed or approved (exclude pending_approval and rejected)
+  const filteredManual = manual.filter(e => e.status === 'confirmed' || e.status === 'approved')
 
   const byProject = new Map<string, {
     projectName: string
@@ -130,7 +186,7 @@ export async function aggregateByProject(filters: ReportFilters) {
     entries: number
   }>()
 
-  for (const entry of daily) {
+  for (const entry of filteredDaily) {
     const key = entry.projectName ?? 'Unassigned'
     const existing = byProject.get(key) ?? { projectName: key, totalHours: 0, capHours: 0, expHours: 0, entries: 0 }
     const hours = entry.hoursConfirmed ?? 0
@@ -141,7 +197,7 @@ export async function aggregateByProject(filters: ReportFilters) {
     byProject.set(key, existing)
   }
 
-  for (const entry of manual) {
+  for (const entry of filteredManual) {
     const key = entry.projectName
     const existing = byProject.get(key) ?? { projectName: key, totalHours: 0, capHours: 0, expHours: 0, entries: 0 }
     existing.totalHours += entry.hours
@@ -155,11 +211,56 @@ export async function aggregateByProject(filters: ReportFilters) {
 }
 
 /**
+ * Aggregate hours by work type for a date range.
+ */
+export async function aggregateByWorkType(filters: ReportFilters) {
+  const daily = await queryDailyEntries({ ...filters, status: undefined, statuses: ['confirmed', 'approved'] })
+
+  // Filter: include confirmed entries, but for requiresManagerApproval projects, require approved
+  const filteredDaily = daily.filter(e => {
+    if (e.status === 'approved') return true
+    if (e.status === 'confirmed' && !e.requiresManagerApproval) return true
+    return false
+  })
+
+  const byWorkType = new Map<string, {
+    workType: string
+    totalHours: number
+    capHours: number
+    expHours: number
+    entries: number
+  }>()
+
+  for (const entry of filteredDaily) {
+    const workType = entry.workType ?? 'unclassified'
+    const existing = byWorkType.get(workType) ?? { workType, totalHours: 0, capHours: 0, expHours: 0, entries: 0 }
+    const hours = entry.hoursConfirmed ?? 0
+    existing.totalHours += hours
+    if (entry.capitalizable) existing.capHours += hours
+    else existing.expHours += hours
+    existing.entries++
+    byWorkType.set(workType, existing)
+  }
+
+  return Array.from(byWorkType.values()).sort((a, b) => b.totalHours - a.totalHours)
+}
+
+/**
  * Aggregate hours by developer for a date range.
  */
 export async function aggregateByDeveloper(filters: ReportFilters) {
-  const daily = await queryDailyEntries({ ...filters, status: 'confirmed' })
+  const daily = await queryDailyEntries({ ...filters, status: undefined, statuses: ['confirmed', 'approved'] })
   const manual = await queryManualEntries(filters)
+
+  // Filter: include confirmed entries, but for requiresManagerApproval projects, require approved
+  const filteredDaily = daily.filter(e => {
+    if (e.status === 'approved') return true
+    if (e.status === 'confirmed' && !e.requiresManagerApproval) return true
+    return false
+  })
+
+  // Filter manual entries: only include confirmed or approved (exclude pending_approval and rejected)
+  const filteredManual = manual.filter(e => e.status === 'confirmed' || e.status === 'approved')
 
   const byDev = new Map<string, {
     developerName: string
@@ -169,7 +270,7 @@ export async function aggregateByDeveloper(filters: ReportFilters) {
     expHours: number
   }>()
 
-  for (const entry of daily) {
+  for (const entry of filteredDaily) {
     const key = entry.developerEmail
     const existing = byDev.get(key) ?? { developerName: entry.developerName, developerEmail: key, totalHours: 0, capHours: 0, expHours: 0 }
     const hours = entry.hoursConfirmed ?? 0
@@ -179,7 +280,7 @@ export async function aggregateByDeveloper(filters: ReportFilters) {
     byDev.set(key, existing)
   }
 
-  for (const entry of manual) {
+  for (const entry of filteredManual) {
     const key = entry.developerEmail
     const existing = byDev.get(key) ?? { developerName: entry.developerName, developerEmail: key, totalHours: 0, capHours: 0, expHours: 0 }
     existing.totalHours += entry.hours

@@ -10,7 +10,7 @@ import type {
 } from '@/lib/validations/project'
 import type { Prisma } from '@/generated/prisma/client'
 
-const APPROVAL_EMAIL = 'scott.schatz@townsquaremedia.com'
+// Role-based approval: admin or manager role required (replaces hardcoded email check)
 
 // ============================================================
 // CREATE
@@ -347,7 +347,7 @@ export async function requestPhaseChange(
     },
   })
 
-  // TODO: Send approval email to APPROVAL_EMAIL (Phase 2.4)
+  // TODO: Send approval email to admins/managers (Phase 2.4)
 
   return request
 }
@@ -357,11 +357,19 @@ export async function approvePhaseChange(
   requestId: string,
   input: PhaseChangeReviewInput,
   reviewerId: string,
-  reviewerEmail: string
+  reviewerRole: string
 ) {
-  // Enforce: only admin with the designated approval email
-  if (reviewerEmail !== APPROVAL_EMAIL) {
-    throw new Error(`Only ${APPROVAL_EMAIL} can approve phase changes`)
+  // Enforce: only admin or manager can approve phase changes
+  if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
+    throw new Error('Manager or admin access required to approve phase changes')
+  }
+
+  // Conflict-of-interest: approver cannot have entries on the same project
+  const hasEntries = await prisma.dailyEntry.count({
+    where: { developerId: reviewerId, projectId },
+  })
+  if (hasEntries > 0) {
+    throw new Error('Cannot approve phase change for a project you have entries on (conflict of interest)')
   }
 
   const request = await prisma.phaseChangeRequest.findUniqueOrThrow({
@@ -420,11 +428,11 @@ export async function rejectPhaseChange(
   requestId: string,
   input: PhaseChangeReviewInput,
   reviewerId: string,
-  reviewerEmail: string
+  reviewerRole: string
 ) {
-  // Only admin with designated email can reject
-  if (reviewerEmail !== APPROVAL_EMAIL) {
-    throw new Error(`Only ${APPROVAL_EMAIL} can reject phase changes`)
+  // Only admin or manager can reject phase changes
+  if (reviewerRole !== 'admin' && reviewerRole !== 'manager') {
+    throw new Error('Manager or admin access required to reject phase changes')
   }
 
   const request = await prisma.phaseChangeRequest.findUniqueOrThrow({
@@ -462,10 +470,18 @@ export async function directPhaseChange(
   projectId: string,
   input: DirectPhaseChangeInput,
   adminId: string,
-  adminEmail: string
+  adminRole: string
 ) {
-  if (adminEmail !== APPROVAL_EMAIL) {
-    throw new Error(`Only ${APPROVAL_EMAIL} can directly change project phases`)
+  if (adminRole !== 'admin' && adminRole !== 'manager') {
+    throw new Error('Manager or admin access required to directly change project phases')
+  }
+
+  // Conflict-of-interest: admin/manager cannot directly change phase on a project where they have recorded hours
+  const hasEntries = await prisma.dailyEntry.count({
+    where: { developerId: adminId, projectId },
+  })
+  if (hasEntries > 0) {
+    throw new Error('Cannot directly change phase on a project where you have recorded hours (conflict of interest). Use the standard phase change request workflow.')
   }
 
   const project = await prisma.project.findUniqueOrThrow({

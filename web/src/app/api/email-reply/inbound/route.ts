@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAIClient } from '@/lib/ai/client'
+import Anthropic from '@anthropic-ai/sdk'
 
 // POST /api/email-reply/inbound — Process inbound email replies via AI
 // Protected by webhook secret — only the email provider should call this
@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unknown sender' }, { status: 404 })
     }
 
-    // Call AI to interpret the reply
-    const client = getAIClient()
+    // Call AI to interpret the reply (uses Anthropic directly — different from entry generation)
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const interpretation = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 1024,

@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Link from 'next/link'
-import { format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { format, subDays } from 'date-fns'
 import {
   FolderKanban,
   Clock,
@@ -13,122 +13,191 @@ import {
   CheckCircle,
   TrendingUp,
 } from 'lucide-react'
+import { DashboardDeveloperFilter } from '@/components/dashboard/developer-filter'
 
-export default async function DashboardPage() {
-  const developer = await requireDeveloper()
+interface SearchParams {
+  developer?: string
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const currentDeveloper = await requireDeveloper()
+  const params = await searchParams
+  const isAdmin = currentDeveloper.role === 'admin'
   const now = new Date()
-  const todayStr = format(now, 'yyyy-MM-dd')
-  const weekStart = startOfWeek(now, { weekStartsOn: 1 })
-  const weekEnd = endOfWeek(now, { weekStartsOn: 1 })
-  const monthStart = startOfMonth(now)
-  const monthEnd = endOfMonth(now)
+  const companyTz = process.env.CAP_TIMEZONE ?? 'America/New_York'
+  const tzShort = new Intl.DateTimeFormat('en-US', { timeZone: companyTz, timeZoneName: 'short' })
+    .formatToParts(now).find(p => p.type === 'timeZoneName')?.value ?? 'ET'
+
+  // Get today's date in company timezone — entry dates are stored as YYYY-MM-DDT00:00:00Z
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: companyTz }).format(now) // en-CA → YYYY-MM-DD
+
+  // Week boundaries (Monday start) based on company timezone "today"
+  const todayAsUTCMidnight = new Date(`${todayStr}T00:00:00.000Z`)
+  const todayDow = todayAsUTCMidnight.getUTCDay() // 0=Sun
+  const mondayOffset = todayDow === 0 ? 6 : todayDow - 1
+  const weekStart = new Date(todayAsUTCMidnight)
+  weekStart.setUTCDate(weekStart.getUTCDate() - mondayOffset)
+  const weekEnd = new Date(weekStart)
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
+
+  // Month boundaries in company timezone
+  const [tyear, tmonth] = todayStr.split('-').map(Number)
+  const monthStart = new Date(Date.UTC(tyear, tmonth - 1, 1))
+  const monthEnd = new Date(Date.UTC(tyear, tmonth, 0)) // last day of month
+
+  // Determine which developer(s) to show
+  const viewAll = isAdmin && params.developer === 'all'
+  const viewDevId = isAdmin && params.developer && params.developer !== 'all'
+    ? params.developer
+    : null
+  const targetDevId = viewDevId ?? (viewAll ? undefined : currentDeveloper.id)
+  const devFilter = targetDevId ? { developerId: targetDevId } : {}
+  const viewingOwnData = !viewAll && !viewDevId
+
+  // Load developer list for admin filter
+  const allDevelopers = isAdmin
+    ? await prisma.developer.findMany({
+        select: { id: true, displayName: true, email: true },
+        orderBy: { displayName: 'asc' },
+      })
+    : []
+
+  const viewLabel = viewAll
+    ? 'All Developers'
+    : viewDevId
+      ? allDevelopers.find((d) => d.id === viewDevId)?.displayName ?? 'Developer'
+      : currentDeveloper.displayName
 
   const [
     projectCount,
     pendingEntries,
     recentSyncs,
     pendingPhaseChanges,
-    weeklyEntries,
-    monthlyEntries,
+    weeklyConfirmed,
+    weeklyPending,
+    monthlyConfirmed,
+    monthlyPending,
     staleEntries,
-    weeklyPendingEntries,
-    monthlyPendingEntries,
   ] = await Promise.all([
     prisma.project.count({ where: { status: 'active' } }),
     prisma.dailyEntry.count({
-      where: { developerId: developer.id, status: 'pending' },
+      where: { ...devFilter, status: 'pending' },
     }),
-    prisma.agentSyncLog.count({
-      where: { developerId: developer.id },
-    }),
-    developer.role === 'admin'
+    viewingOwnData
+      ? prisma.agentSyncLog.count({ where: { developerId: currentDeveloper.id } })
+      : Promise.resolve(1), // skip getting started card for non-self views
+    isAdmin
       ? prisma.phaseChangeRequest.count({ where: { status: 'pending' } })
       : Promise.resolve(0),
     prisma.dailyEntry.findMany({
-      where: {
-        developerId: developer.id,
-        status: 'confirmed',
-        date: { gte: weekStart, lte: weekEnd },
-      },
+      where: { ...devFilter, status: 'confirmed', date: { gte: weekStart, lte: weekEnd } },
       include: { project: { select: { name: true, phase: true } } },
     }),
     prisma.dailyEntry.findMany({
-      where: {
-        developerId: developer.id,
-        status: 'confirmed',
-        date: { gte: monthStart, lte: monthEnd },
-      },
+      where: { ...devFilter, status: 'pending', date: { gte: weekStart, lte: weekEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'confirmed', date: { gte: monthStart, lte: monthEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'pending', date: { gte: monthStart, lte: monthEnd } },
       include: { project: { select: { name: true, phase: true } } },
     }),
     prisma.dailyEntry.count({
-      where: {
-        developerId: developer.id,
-        status: 'pending',
-        createdAt: { lt: subDays(now, 2) },
-      },
-    }),
-    prisma.dailyEntry.findMany({
-      where: {
-        developerId: developer.id,
-        status: 'pending',
-        date: { gte: weekStart, lte: weekEnd },
-      },
-      include: { project: { select: { name: true, phase: true } } },
-    }),
-    prisma.dailyEntry.findMany({
-      where: {
-        developerId: developer.id,
-        status: 'pending',
-        date: { gte: monthStart, lte: monthEnd },
-      },
-      include: { project: { select: { name: true, phase: true } } },
+      where: { ...devFilter, status: 'pending', createdAt: { lt: subDays(now, 2) } },
     }),
   ])
 
-  // Compute weekly stats (confirmed + pending estimates)
-  const weeklyConfirmedHours = weeklyEntries.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
-  const weeklyConfirmedCapHours = weeklyEntries
+  // Weekly stats — confirmed vs pending separately
+  const wkConfHours = weeklyConfirmed.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const wkConfCap = weeklyConfirmed
     .filter((e) => e.phaseConfirmed === 'application_development')
     .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
-  const weeklyPendingHours = weeklyPendingEntries.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
-  const weeklyPendingCapHours = weeklyPendingEntries
+  const wkPendHours = weeklyPending.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const wkPendCap = weeklyPending
     .filter((e) => e.phaseAuto === 'application_development')
     .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
-  const weeklyHours = weeklyConfirmedHours + weeklyPendingHours
-  const weeklyCapHours = weeklyConfirmedCapHours + weeklyPendingCapHours
-  const hasWeeklyPending = weeklyPendingHours > 0
 
-  // Compute monthly stats by project (confirmed + pending estimates)
-  const monthlyByProject = new Map<string, { name: string; hours: number; capHours: number; pendingHours: number }>()
-  for (const e of monthlyEntries) {
+  // Monthly stats — confirmed vs pending separately
+  const moConfHours = monthlyConfirmed.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const moConfCap = monthlyConfirmed
+    .filter((e) => e.phaseConfirmed === 'application_development')
+    .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const moPendHours = monthlyPending.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const moPendCap = monthlyPending
+    .filter((e) => e.phaseAuto === 'application_development')
+    .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+
+  // Monthly by project (confirmed + pending split)
+  const monthlyByProject = new Map<string, { name: string; confHours: number; confCap: number; pendHours: number; pendCap: number }>()
+  for (const e of monthlyConfirmed) {
     const name = e.project?.name ?? 'Unmatched'
-    const existing = monthlyByProject.get(name) || { name, hours: 0, capHours: 0, pendingHours: 0 }
-    existing.hours += e.hoursConfirmed ?? 0
-    if (e.phaseConfirmed === 'application_development') {
-      existing.capHours += e.hoursConfirmed ?? 0
-    }
+    const existing = monthlyByProject.get(name) || { name, confHours: 0, confCap: 0, pendHours: 0, pendCap: 0 }
+    existing.confHours += e.hoursConfirmed ?? 0
+    if (e.phaseConfirmed === 'application_development') existing.confCap += e.hoursConfirmed ?? 0
     monthlyByProject.set(name, existing)
   }
-  for (const e of monthlyPendingEntries) {
+  for (const e of monthlyPending) {
     const name = e.project?.name ?? 'Unmatched'
-    const existing = monthlyByProject.get(name) || { name, hours: 0, capHours: 0, pendingHours: 0 }
-    existing.hours += e.hoursEstimated ?? 0
-    existing.pendingHours += e.hoursEstimated ?? 0
-    if (e.phaseAuto === 'application_development') {
-      existing.capHours += e.hoursEstimated ?? 0
-    }
+    const existing = monthlyByProject.get(name) || { name, confHours: 0, confCap: 0, pendHours: 0, pendCap: 0 }
+    existing.pendHours += e.hoursEstimated ?? 0
+    if (e.phaseAuto === 'application_development') existing.pendCap += e.hoursEstimated ?? 0
     monthlyByProject.set(name, existing)
   }
-  const monthlyTotal = [...monthlyByProject.values()].reduce((s, p) => s + p.hours, 0)
-  const monthlyCapTotal = [...monthlyByProject.values()].reduce((s, p) => s + p.capHours, 0)
-  const hasMonthlyPending = monthlyPendingEntries.length > 0
+
+  // Daily breakdown — confirmed vs pending per day (UTC date string comparison)
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart)
+    d.setUTCDate(d.getUTCDate() + i)
+    return d
+  })
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const dailyBreakdown = weekDays.map((day) => {
+    const dayStr = day.toISOString().slice(0, 10)
+    const confEntries = weeklyConfirmed.filter((e) => new Date(e.date).toISOString().slice(0, 10) === dayStr)
+    const pendEntries = weeklyPending.filter((e) => new Date(e.date).toISOString().slice(0, 10) === dayStr)
+    const confHours = confEntries.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+    const confCap = confEntries
+      .filter((e) => e.phaseConfirmed === 'application_development')
+      .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+    const pendHours = pendEntries.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+    const pendCap = pendEntries
+      .filter((e) => e.phaseAuto === 'application_development')
+      .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+    const isToday = dayStr === todayStr
+    return {
+      label: dayNames[day.getUTCDay()],
+      dateLabel: `${day.getUTCMonth() + 1}/${day.getUTCDate()}`,
+      confHours, confCap, pendHours, pendCap,
+      totalHours: confHours + pendHours,
+      isToday,
+    }
+  })
+  const maxDailyHours = Math.max(...dailyBreakdown.map((d) => d.totalHours), 1)
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back, {developer.displayName}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">Welcome back, {currentDeveloper.displayName}</p>
+        </div>
+        {isAdmin && (
+          <DashboardDeveloperFilter
+            developers={allDevelopers}
+            currentDevId={params.developer ?? currentDeveloper.id}
+          />
+        )}
       </div>
+
+      {/* Viewing indicator */}
+      {!viewingOwnData && (
+        <div className="text-sm text-muted-foreground">
+          Viewing: <span className="font-medium text-foreground">{viewLabel}</span>
+        </div>
+      )}
 
       {/* Alerts */}
       {(staleEntries > 0 || pendingPhaseChanges > 0) && (
@@ -137,8 +206,8 @@ export default async function DashboardPage() {
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                You have <strong>{staleEntries}</strong> unconfirmed entries older than 48 hours.{' '}
-                <Link href={`/review/${todayStr}`} className="underline font-medium">
+                {viewAll ? 'There are' : 'You have'} <strong>{staleEntries}</strong> unconfirmed entries older than 48 hours.{' '}
+                <Link href="/review" className="underline font-medium">
                   Review now
                 </Link>
               </AlertDescription>
@@ -191,7 +260,7 @@ export default async function DashboardPage() {
               )}
             </div>
             <Link
-              href={`/review/${todayStr}`}
+              href="/review"
               className="text-xs text-muted-foreground hover:underline inline-flex items-center gap-1 mt-1"
             >
               Review entries <ArrowRight className="h-3 w-3" />
@@ -201,44 +270,123 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">This Week</CardTitle>
+            <CardTitle className="text-sm font-medium">This Week <span className="text-muted-foreground font-normal">({tzShort})</span></CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {weeklyHours.toFixed(1)}h
-              {hasWeeklyPending && (
-                <span className="text-sm font-normal text-muted-foreground ml-1">est.</span>
+              {wkConfHours.toFixed(1)}h
+              {wkPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{wkPendHours.toFixed(1)}h pending</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              <span className="text-green-600 font-medium">{weeklyCapHours.toFixed(1)}h</span>{' '}
-              capitalizable
+              <span className="text-green-600 font-medium">{wkConfCap.toFixed(1)}h</span> capitalizable
+              {wkPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{wkPendCap.toFixed(1)}h est.)</span>
+              )}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">This Month</CardTitle>
+            <CardTitle className="text-sm font-medium">This Month <span className="text-muted-foreground font-normal">({tzShort})</span></CardTitle>
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {monthlyTotal.toFixed(1)}h
-              {hasMonthlyPending && (
-                <span className="text-sm font-normal text-muted-foreground ml-1">est.</span>
+              {moConfHours.toFixed(1)}h
+              {moPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{moPendHours.toFixed(1)}h pending</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              <span className="text-green-600 font-medium">{monthlyCapTotal.toFixed(1)}h</span>{' '}
-              capitalizable
+              <span className="text-green-600 font-medium">{moConfCap.toFixed(1)}h</span> capitalizable
+              {moPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{moPendCap.toFixed(1)}h est.)</span>
+              )}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Monthly breakdown by project */}
+      {/* Weekly daily breakdown — stacked confirmed + pending */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            This Week — Daily Hours ({tzShort})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-end gap-2 h-32">
+            {dailyBreakdown.map((d) => {
+              const barHeight = maxDailyHours > 0 ? (d.totalHours / maxDailyHours) * 100 : 0
+              const confPct = d.totalHours > 0 ? (d.confHours / d.totalHours) * 100 : 0
+              // Within confirmed portion, show capitalizable vs expensed
+              const confCapPct = d.confHours > 0 ? (d.confCap / d.confHours) * 100 : 0
+              return (
+                <div key={d.label} className="flex-1 flex flex-col items-center gap-1">
+                  {d.totalHours > 0 && (
+                    <span className="text-[10px] text-muted-foreground">{d.totalHours.toFixed(1)}h</span>
+                  )}
+                  <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
+                    {d.totalHours > 0 ? (
+                      <div
+                        className="w-full rounded-t overflow-hidden flex flex-col"
+                        style={{ height: `${barHeight}%` }}
+                      >
+                        {/* Pending portion (top, amber) */}
+                        {d.pendHours > 0 && (
+                          <div
+                            className="bg-amber-400/50 w-full"
+                            style={{ height: `${100 - confPct}%` }}
+                          />
+                        )}
+                        {/* Confirmed capitalizable (green) */}
+                        {d.confCap > 0 && (
+                          <div
+                            className="bg-green-500 w-full"
+                            style={{ height: `${confPct * confCapPct / 100}%` }}
+                          />
+                        )}
+                        {/* Confirmed expensed (gray) */}
+                        {d.confHours - d.confCap > 0 && (
+                          <div
+                            className="bg-muted-foreground/20 w-full"
+                            style={{ height: `${confPct * (100 - confCapPct) / 100}%` }}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="w-full h-0.5 bg-muted rounded" />
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <div className={`text-[11px] font-medium ${d.isToday ? 'text-primary' : 'text-muted-foreground'}`}>
+                      {d.label}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground">{d.dateLabel}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex items-center gap-4 mt-3 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-green-500 inline-block" /> Confirmed Cap.
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-muted-foreground/20 inline-block" /> Confirmed Exp.
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-amber-400/50 inline-block" /> Pending
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Monthly breakdown by project — confirmed + pending */}
       {monthlyByProject.size > 0 && (
         <Card>
           <CardHeader>
@@ -249,31 +397,45 @@ export default async function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {[...monthlyByProject.values()]
-                .sort((a, b) => b.hours - a.hours)
+                .sort((a, b) => (b.confHours + b.pendHours) - (a.confHours + a.pendHours))
                 .map((p) => {
-                  const capPct = p.hours > 0 ? (p.capHours / p.hours) * 100 : 0
-                  const isPending = p.pendingHours > 0
+                  const total = p.confHours + p.pendHours
+                  const totalCap = p.confCap + p.pendCap
+                  const capPct = total > 0 ? (totalCap / total) * 100 : 0
+                  const confPct = total > 0 ? (p.confHours / total) * 100 : 0
                   return (
                     <div key={p.name} className="space-y-1">
                       <div className="flex justify-between text-sm">
                         <span className="font-medium">{p.name}</span>
-                        <span>
-                          {p.hours.toFixed(1)}h
-                          {isPending && (
-                            <span className="text-muted-foreground ml-1 text-xs">est.</span>
+                        <span className="flex items-center gap-2">
+                          <span>{p.confHours.toFixed(1)}h</span>
+                          {p.pendHours > 0 && (
+                            <span className="text-amber-600 text-xs">+{p.pendHours.toFixed(1)}h pending</span>
                           )}
-                          {p.capHours > 0 && (
-                            <span className="text-green-600 ml-1">
-                              ({p.capHours.toFixed(1)}h cap)
+                          {totalCap > 0 && (
+                            <span className="text-green-600 text-xs">
+                              ({totalCap.toFixed(1)}h cap)
                             </span>
                           )}
                         </span>
                       </div>
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div className="h-2 bg-muted rounded-full overflow-hidden flex">
                         <div
-                          className={`h-full rounded-full ${isPending ? 'bg-green-400/60' : 'bg-green-500'}`}
-                          style={{ width: `${capPct}%` }}
+                          className="bg-green-500 h-full"
+                          style={{ width: `${Math.min(confPct, capPct)}%` }}
                         />
+                        {confPct > capPct && (
+                          <div
+                            className="bg-muted-foreground/30 h-full"
+                            style={{ width: `${confPct - capPct}%` }}
+                          />
+                        )}
+                        {p.pendHours > 0 && (
+                          <div
+                            className="bg-amber-400/50 h-full"
+                            style={{ width: `${100 - confPct}%` }}
+                          />
+                        )}
                       </div>
                     </div>
                   )
@@ -283,8 +445,8 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {/* Getting started (only if no syncs) */}
-      {recentSyncs === 0 && (
+      {/* Getting started (only if no syncs — own view only) */}
+      {viewingOwnData && recentSyncs === 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Getting Started</CardTitle>

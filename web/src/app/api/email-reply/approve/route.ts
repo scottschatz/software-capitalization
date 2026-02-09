@@ -3,7 +3,7 @@ import { verifyActionToken } from '@/lib/email/tokens'
 import { prisma } from '@/lib/prisma'
 import { escapeHtml } from '@/lib/email/templates'
 
-const APPROVAL_EMAIL = 'scott.schatz@townsquaremedia.com'
+// Role-based approval: admin or manager role required (replaces hardcoded email check)
 
 // GET /api/email-reply/approve?token=<jwt> — Show confirmation page (no state change)
 export async function GET(request: NextRequest) {
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         where: { id: payload.developerId },
       })
 
-      if (developer.role !== 'admin' || developer.email !== APPROVAL_EMAIL) {
+      if (developer.role !== 'admin' && developer.role !== 'manager') {
         return new NextResponse(renderResult('Not authorized', false), {
           headers: { 'Content-Type': 'text/html' },
           status: 403,
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
         where: { id: payload.developerId },
       })
 
-      if (developer.role !== 'admin' || developer.email !== APPROVAL_EMAIL) {
+      if (developer.role !== 'admin' && developer.role !== 'manager') {
         return new NextResponse(renderResult('Not authorized', false), {
           headers: { 'Content-Type': 'text/html' },
           status: 403,

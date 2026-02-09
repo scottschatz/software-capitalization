@@ -20,14 +20,10 @@ describe('buildDailyEntryPrompt', () => {
     expect(prompt).toContain('2026-01-15')
   })
 
-  it('includes ASC 350-40 phase rules', () => {
+  it('includes ASC 350-40 context', () => {
     const prompt = buildDailyEntryPrompt(makeContext())
     expect(prompt).toContain('ASC 350-40')
-    expect(prompt).toContain('Preliminary')
-    expect(prompt).toContain('Application Development')
-    expect(prompt).toContain('Post-Implementation')
-    expect(prompt).toContain('CAPITALIZED')
-    expect(prompt).toContain('EXPENSED')
+    expect(prompt).toContain('capitalization')
   })
 
   it('includes project details when provided', () => {
@@ -74,7 +70,6 @@ describe('buildDailyEntryPrompt', () => {
     })
     const prompt = buildDailyEntryPrompt(ctx)
     expect(prompt).toContain('sess-123') // truncated session ID
-    expect(prompt).toContain('60min')
     expect(prompt).toContain('10 msgs')
     expect(prompt).toContain('5 tools')
     expect(prompt).toContain('1500 tokens') // 1000 + 500
@@ -113,5 +108,91 @@ describe('buildDailyEntryPrompt', () => {
     expect(prompt).toContain('"projectId"')
     expect(prompt).toContain('"hoursEstimate"')
     expect(prompt).toContain('"confidence"')
+  })
+
+  it('includes active time data when provided', () => {
+    const ctx = makeContext({
+      sessions: [
+        {
+          sessionId: 'sess-12345678-abcd-1234-abcd-123456789012',
+          projectPath: '-home-user-project',
+          startedAt: new Date('2026-01-15T10:00:00Z'),
+          endedAt: new Date('2026-01-15T14:00:00Z'),
+          durationSeconds: 14400,
+          totalInputTokens: 5000,
+          totalOutputTokens: 2000,
+          messageCount: 50,
+          toolUseCount: 30,
+          model: 'claude-sonnet-4-5-20250929',
+          toolBreakdown: { Edit: 10, Read: 15, Bash: 5 },
+          filesReferenced: ['src/app.ts', 'src/utils.ts'],
+          firstUserPrompt: 'Help me fix the login',
+          userPromptCount: 20,
+          activeWindow: {
+            first: '2026-01-15T15:00:00Z',
+            last: '2026-01-15T18:30:00Z',
+            minutes: 180,
+            wallClockMinutes: 210,
+          },
+          userPrompts: [
+            { time: '2026-01-15T15:00:00Z', text: 'Fix the login bug' },
+            { time: '2026-01-15T15:30:00Z', text: 'Now add unit tests' },
+          ],
+        },
+      ],
+    })
+    const prompt = buildDailyEntryPrompt(ctx)
+    expect(prompt).toContain('Active time: 3.0h')
+    expect(prompt).toContain('gap-aware')
+    expect(prompt).toContain('Edit:10')
+    expect(prompt).toContain('Fix the login bug')
+    expect(prompt).toContain('Now add unit tests')
+  })
+
+  it('includes tool events when provided', () => {
+    const ctx = makeContext({
+      sessions: [
+        {
+          sessionId: 'sess-1',
+          projectPath: '-home-user-project',
+          startedAt: new Date('2026-01-15T10:00:00Z'),
+          endedAt: null,
+          durationSeconds: null,
+          totalInputTokens: 100,
+          totalOutputTokens: 50,
+          messageCount: 5,
+          toolUseCount: 3,
+          model: null,
+          toolBreakdown: null,
+          filesReferenced: [],
+          firstUserPrompt: null,
+          userPromptCount: null,
+        },
+      ],
+      toolEvents: [
+        {
+          toolName: 'Edit',
+          projectPath: '/home/user/project',
+          timestamp: new Date('2026-01-15T10:05:00Z'),
+          filePath: 'src/app.ts',
+        },
+        {
+          toolName: 'Read',
+          projectPath: '/home/user/project',
+          timestamp: new Date('2026-01-15T10:06:00Z'),
+        },
+      ],
+    })
+    const prompt = buildDailyEntryPrompt(ctx)
+    expect(prompt).toContain('Real-Time Tool Events')
+    expect(prompt).toContain('2 events')
+    expect(prompt).toContain('Edit:1')
+    expect(prompt).toContain('Read:1')
+  })
+
+  it('includes enhancement detection instructions', () => {
+    const prompt = buildDailyEntryPrompt(makeContext())
+    expect(prompt).toContain('enhancementSuggested')
+    expect(prompt).toContain('enhancementReason')
   })
 })
