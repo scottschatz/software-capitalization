@@ -59,9 +59,14 @@ export function Sidebar({ role }: SidebarProps) {
       </div>
       <nav className="flex flex-col gap-1 p-3">
         {allItems.map((item) => {
+          // Only highlight the most specific matching item.
+          // E.g. on /settings/system-health, highlight "System Health" not "Settings"
           const isActive = item.href === '/'
             ? pathname === '/'
-            : pathname.startsWith(item.href)
+            : pathname === item.href || (
+                pathname.startsWith(item.href + '/') &&
+                !allItems.some(other => other.href !== item.href && pathname.startsWith(other.href) && other.href.length > item.href.length)
+              )
 
           return (
             <Link

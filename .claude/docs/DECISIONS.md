@@ -225,6 +225,48 @@ AI defaults to `application_development` for all coding work. Only uses `prelimi
 
 ---
 
+## Circuit Breaker for Local LLM Fallback
+- **Date**: 2026-02-09
+- **Status**: Accepted
+
+### Context
+Local LLM (gpt-oss-20b) can crash or become unreachable. With 3 retries at 3min timeout each, a down model wastes 9+ minutes per date before falling back to Haiku. When processing 40+ dates in batch, this is unacceptable.
+
+### Decision
+Three-state circuit breaker: `normal` (full 3 retries), `skip` (go straight to Haiku), `probe` (try once after 30min cooldown). State is determined by querying the last 5 model events from the `model_events` table. If all are fallbacks, circuit opens. After 30min, a single probe tests recovery — if it succeeds, the `success` event breaks the fallback streak and circuit closes.
+
+### Alternatives
+1. **Simple retry count only**: No adaptation to persistent outages — always wastes time retrying
+2. **Manual circuit breaker toggle**: Requires human intervention to flip a flag when model is down/up
+3. **Health check endpoint polling**: Would need a separate background process; model can pass health checks but still crash on specific inputs
+
+### Consequences
+- **Positive**: Self-healing — automatically adapts to model downtime and recovers when model comes back. Zero human intervention needed.
+- **Negative**: 30min cooldown means up to 30min of Haiku-only operation after model recovers. Acceptable tradeoff.
+
+---
+
+## Local LLM as Primary, Anthropic as Fallback
+- **Date**: 2026-02-09
+- **Status**: Accepted
+
+### Context
+Anthropic Haiku works well but has per-token costs. A local gpt-oss-20b instance is available on the internal network at no marginal cost.
+
+### Decision
+Use local LLM as primary for all AI calls (entry generation, work type classification). Fall back to Haiku on failure. Log all model events for observability. Track which model generated each entry via `modelUsed`/`modelFallback` fields.
+
+### Alternatives
+1. **Haiku only**: Simpler but ongoing API costs
+2. **Local only, no fallback**: Risky — model crashes would block entry generation entirely
+3. **Request-level model selection**: Over-complex for current needs
+
+### Consequences
+- **Positive**: Zero marginal cost for most calls; Haiku fallback ensures reliability; full observability via model_events table
+- **Negative**: Two model paths to test; local model can produce different quality results (addressed by improved prompts)
+
+---
+
 ## When to Record
 
 Record decisions for:

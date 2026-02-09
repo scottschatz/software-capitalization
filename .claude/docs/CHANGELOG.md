@@ -2,6 +2,54 @@
 
 All notable changes documented here.
 
+## [0.7.0] - 2026-02-09
+
+### Added — Local LLM Support & Model Health Monitoring
+- **Local LLM Integration**: Primary model is now `gpt-oss-20b` via OpenAI-compatible API (`AI_LOCAL_URL`), with Anthropic Haiku as fallback
+- **Retry Logic**: 3 retries with 2s delay before falling back to Haiku
+- **Circuit Breaker**: After 3+ consecutive fallbacks, skips retries for 30min then probes once to auto-recover when local model comes back online
+- **Model Event Logging**: New `model_events` table tracks every AI call — success, retry, fallback, error — with latency, attempt count, target date, and error messages
+- **System Health Page**: Admin-only page at `/settings/system-health` showing model config, 7-day success rate, fallback dates, entry model distribution, and scrollable event log with alert banner for consecutive fallbacks
+- **Hooks Quality Dot**: Violet dot in data quality indicators showing real-time hook event richness (alongside blue sessions and green commits)
+- **Expense Hours in Day Header**: Day accordion header now shows expense hours alongside total and capitalizable
+- **Special Token Stripping**: Strips `<|...|>` control tokens (gpt-oss/vLLM) and `<think>` blocks (Qwen3/DeepSeek-R1) from model responses
+- **Regeneration Scripts**: `scripts/regenerate-with-local-llm.ts` for full model comparison, `scripts/regen-targeted.ts` for specific dates, `scripts/measure-prompt-size.ts` for context window analysis
+
+### Changed
+- **AI Prompt (Commit-Only Projects)**: Conservative guidance — LOC does not equal hours; generated code, migrations, schema dumps can add thousands of lines in minutes
+- **Work Type Classifier**: Now passes `prompt: 'classification'` for separate circuit breaker tracking
+- **AICompletionResult Interface**: Added `retryCount` field to track retry depth
+- **CompletionOptions Interface**: Added `targetDate` and `prompt` fields for event logging
+
+### Fixed
+- **Jan 30 Over-Estimation**: GPT-OSS estimated 13.2h due to high LOC in auto-generated code; improved prompt reduced to 3.8h
+
+---
+
+## [0.6.0] - 2026-02-08
+
+### Added — Review UX, Audit Controls, Reporting Enhancements
+- **Data Quality Badges**: Session (blue), commit (green) quality dots with intensity-based coloring on each entry card
+- **Confidence Badge**: AI confidence score displayed as colored badge (green/blue/amber/red) in entry card header
+- **`confidenceScore` Field**: New `Float?` column on DailyEntry, stored at generation time and backfilled from existing entries
+- **Rejection Workflow**: Entries can be rejected with reason; rejected status + tracking fields on DailyEntry
+- **Multi-Date Review**: `/review/[date]` page for single-day deep-dive
+- **Gap Detection**: `generateWithGapDetection()` auto-backfills missed dates in last 7 days
+- **Report Tooltips**: Info tooltips explaining metrics on reports page
+- **Monthly Executive Summary**: AI-generated narrative summaries per month
+- **Period Locks**: SOX compliance month-end close with open/soft_close/locked states
+- **Manual Entry Approval**: Workflow for manual time entries requiring manager sign-off
+- **Work Type Classification**: Heuristic + LLM classifier (coding/debugging/refactoring/research/testing/documentation/devops)
+- **Cross-Validation**: Anomaly detection flags entries with hours significantly above developer's historical average
+- **Export Improvements**: CSV/JSON export with work type and outlier flags
+
+### Changed
+- **Session Filtering**: Multi-day sessions filtered by `dailyBreakdown` — only includes sessions with actual activity on the target date
+- **Timezone Handling**: Consistent `CAP_TIMEZONE` usage across all day boundary calculations
+- **Gap-Aware Active Time**: Only intervals <15min between messages count as active time
+
+---
+
 ## [0.5.0] - 2026-02-06
 
 ### Added — Phase 5: Hybrid Integration

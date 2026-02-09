@@ -1,6 +1,6 @@
 # Architecture Overview
 
-> Last updated: 2026-02-06
+> Last updated: 2026-02-09
 
 ## Tech Stack
 
@@ -13,7 +13,7 @@
 | Database | PostgreSQL | 16 | Primary data store |
 | ORM | Prisma | 7.3.0 | Type-safe database access |
 | Auth | NextAuth v4 + Azure AD | 4.24.13 | SSO authentication |
-| AI | Anthropic SDK (Claude Sonnet 4.5) | 0.73.0 | Daily entry generation |
+| AI | Local LLM (gpt-oss-20b) + Anthropic Haiku fallback | — | Daily entry generation |
 | Email | Nodemailer + JWT | 7.0.13 | Email notifications + quick actions |
 | Validation | Zod | 4.3.6 | Schema validation |
 | Forms | React Hook Form | 7.71.1 | Form state management |
@@ -46,7 +46,7 @@ software-capitalization/
 │       │   │   ├── projects/         # CRUD UI (list, new, detail, edit)
 │       │   │   ├── review/           # Daily entry review
 │       │   │   ├── reports/          # Monthly reports, project detail, unconfirmed
-│       │   │   ├── settings/         # Agent key management
+│       │   │   ├── settings/         # Agent key management, system health (admin)
 │       │   │   └── team/             # Team admin (developer management)
 │       │   ├── api/                  # 30+ API routes
 │       │   │   ├── agent/            # sync, projects, last-sync, discover, hooks/*, entries/*, hours, activity
@@ -96,9 +96,11 @@ software-capitalization/
 - **Dependencies**: Prisma, Zod validation schemas
 
 ### Web: AI Entry Generation
-- **Purpose**: Claude Sonnet analyzes raw sessions + commits to generate daily time entries
+- **Purpose**: Local LLM (primary) or Anthropic Haiku (fallback) analyzes raw sessions + commits to generate daily time entries
 - **Location**: `web/src/lib/ai/`, `web/src/lib/jobs/generate-daily-entries.ts`
-- **Dependencies**: @anthropic-ai/sdk
+- **Dependencies**: @anthropic-ai/sdk (fallback), OpenAI-compatible API (local)
+- **Resilience**: 3 retries → circuit breaker (30min cooldown) → auto-probe recovery
+- **Observability**: All calls logged to `model_events` table; admin health page at `/settings/system-health`
 - **Enhanced fields**: toolBreakdown, filesReferenced, userPromptCount, firstUserPrompt
 
 ### Web: Email System
@@ -165,14 +167,15 @@ software-capitalization/
 | Agent API | Bearer token → SHA-256 hash lookup | `agent_keys` table |
 | Email actions | Signed JWT (72h expiry) | URL query param |
 
-## Database Schema (22 Models)
+## Database Schema (26 Models)
 
 - **Auth**: Developer, Account, Session, VerificationToken, AgentKey
 - **Immutable Raw Data**: RawSession, RawCommit, RawVscodeActivity, RawToolEvent, AgentSyncLog
 - **Projects**: Project, ProjectRepo, ProjectClaudePath, ProjectHistory, PhaseChangeRequest
-- **Daily Entries**: DailyEntry, ManualEntry, DailyEntryRevision
+- **Daily Entries**: DailyEntry, ManualEntry, DailyEntryRevision, ManualEntryRevision
 - **Email**: EmailLog, EmailReply
-- **Reports**: MonthlyReport
+- **Reports**: MonthlyReport, MonthlyExecutiveSummary
+- **Operational**: ModelEvent, PeriodLock
 
 ## Environment Variables
 
@@ -194,6 +197,11 @@ software-capitalization/
 | `EMAIL_FROM` | Email | Sender address |
 | `EMAIL_JWT_SECRET` | Email | JWT secret for action tokens |
 | `EMAIL_WEBHOOK_SECRET` | Email | Inbound email webhook auth |
+| `AI_LOCAL_URL` | No | Local LLM endpoint (default: `http://10.12.112.8:11434`) |
+| `AI_LOCAL_MODEL` | No | Local model name (default: `qwen/qwen3-32b`) |
+| `AI_LOCAL_ENABLED` | No | Set `"false"` to disable local LLM |
+| `AI_FALLBACK_MODEL` | No | Anthropic fallback model (default: `claude-haiku-4-5-20251001`) |
+| `CAP_TIMEZONE` | No | Company timezone for day boundaries (default: `America/New_York`) |
 
 ## External Services
 

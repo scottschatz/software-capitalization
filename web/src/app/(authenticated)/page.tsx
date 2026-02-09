@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Link from 'next/link'
-import { format, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 import {
   FolderKanban,
   Clock,
@@ -25,9 +25,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const isAdmin = currentDeveloper.role === 'admin'
   const now = new Date()
   const companyTz = process.env.CAP_TIMEZONE ?? 'America/New_York'
-  const tzShort = new Intl.DateTimeFormat('en-US', { timeZone: companyTz, timeZoneName: 'short' })
-    .formatToParts(now).find(p => p.type === 'timeZoneName')?.value ?? 'ET'
-
   // Get today's date in company timezone — entry dates are stored as YYYY-MM-DDT00:00:00Z
   const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: companyTz }).format(now) // en-CA → YYYY-MM-DD
 
@@ -40,10 +37,30 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const weekEnd = new Date(weekStart)
   weekEnd.setUTCDate(weekEnd.getUTCDate() + 6)
 
+  // Previous week boundaries
+  const prevWeekStart = new Date(weekStart)
+  prevWeekStart.setUTCDate(prevWeekStart.getUTCDate() - 7)
+  const prevWeekEnd = new Date(weekStart)
+  prevWeekEnd.setUTCDate(prevWeekEnd.getUTCDate() - 1)
+
   // Month boundaries in company timezone
   const [tyear, tmonth] = todayStr.split('-').map(Number)
   const monthStart = new Date(Date.UTC(tyear, tmonth - 1, 1))
   const monthEnd = new Date(Date.UTC(tyear, tmonth, 0)) // last day of month
+
+  // Previous month boundaries
+  const prevMonthStart = new Date(Date.UTC(tyear, tmonth - 2, 1))
+  const prevMonthEnd = new Date(Date.UTC(tyear, tmonth - 1, 0)) // last day of prev month
+
+  // Formatted date labels (using UTC to avoid timezone shift)
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  const fmtShort = (d: Date) => `${monthNames[d.getUTCMonth()].slice(0, 3)} ${d.getUTCDate()}`
+  const currentMonthLabel = `${monthNames[tmonth - 1]} ${tyear}`
+  const prevMonthIdx = (tmonth - 2 + 12) % 12
+  const prevMonthYear = tmonth === 1 ? tyear - 1 : tyear
+  const prevMonthLabel = `${monthNames[prevMonthIdx]} ${prevMonthYear}`
+  const weekRangeLabel = `${fmtShort(weekStart)}–${fmtShort(weekEnd)}`
+  const prevWeekRangeLabel = `${fmtShort(prevWeekStart)}–${fmtShort(prevWeekEnd)}`
 
   // Determine which developer(s) to show
   const viewAll = isAdmin && params.developer === 'all'
@@ -78,6 +95,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     monthlyConfirmed,
     monthlyPending,
     staleEntries,
+    prevWeeklyConfirmed,
+    prevWeeklyPending,
+    prevMonthlyConfirmed,
+    prevMonthlyPending,
   ] = await Promise.all([
     prisma.project.count({ where: { status: 'active' } }),
     prisma.dailyEntry.count({
@@ -108,6 +129,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     prisma.dailyEntry.count({
       where: { ...devFilter, status: 'pending', createdAt: { lt: subDays(now, 2) } },
     }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'confirmed', date: { gte: prevWeekStart, lte: prevWeekEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'pending', date: { gte: prevWeekStart, lte: prevWeekEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'confirmed', date: { gte: prevMonthStart, lte: prevMonthEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
+    prisma.dailyEntry.findMany({
+      where: { ...devFilter, status: 'pending', date: { gte: prevMonthStart, lte: prevMonthEnd } },
+      include: { project: { select: { name: true, phase: true } } },
+    }),
   ])
 
   // Weekly stats — confirmed vs pending separately
@@ -120,6 +157,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     .filter((e) => e.phaseAuto === 'application_development')
     .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
 
+  // Previous week stats
+  const prevWkConfHours = prevWeeklyConfirmed.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const prevWkConfCap = prevWeeklyConfirmed
+    .filter((e) => e.phaseConfirmed === 'application_development')
+    .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const prevWkPendHours = prevWeeklyPending.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const prevWkPendCap = prevWeeklyPending
+    .filter((e) => e.phaseAuto === 'application_development')
+    .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+
   // Monthly stats — confirmed vs pending separately
   const moConfHours = monthlyConfirmed.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
   const moConfCap = monthlyConfirmed
@@ -127,6 +174,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
   const moPendHours = monthlyPending.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
   const moPendCap = monthlyPending
+    .filter((e) => e.phaseAuto === 'application_development')
+    .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+
+  // Previous month stats
+  const prevMoConfHours = prevMonthlyConfirmed.reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const prevMoConfCap = prevMonthlyConfirmed
+    .filter((e) => e.phaseConfirmed === 'application_development')
+    .reduce((s, e) => s + (e.hoursConfirmed ?? 0), 0)
+  const prevMoPendHours = prevMonthlyPending.reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
+  const prevMoPendCap = prevMonthlyPending
     .filter((e) => e.phaseAuto === 'application_development')
     .reduce((s, e) => s + (e.hoursEstimated ?? 0), 0)
 
@@ -145,6 +202,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     existing.pendHours += e.hoursEstimated ?? 0
     if (e.phaseAuto === 'application_development') existing.pendCap += e.hoursEstimated ?? 0
     monthlyByProject.set(name, existing)
+  }
+
+  // Previous month by project (confirmed + pending split)
+  const prevMonthlyByProject = new Map<string, { name: string; confHours: number; confCap: number; pendHours: number; pendCap: number }>()
+  for (const e of prevMonthlyConfirmed) {
+    const name = e.project?.name ?? 'Unmatched'
+    const existing = prevMonthlyByProject.get(name) || { name, confHours: 0, confCap: 0, pendHours: 0, pendCap: 0 }
+    existing.confHours += e.hoursConfirmed ?? 0
+    if (e.phaseConfirmed === 'application_development') existing.confCap += e.hoursConfirmed ?? 0
+    prevMonthlyByProject.set(name, existing)
+  }
+  for (const e of prevMonthlyPending) {
+    const name = e.project?.name ?? 'Unmatched'
+    const existing = prevMonthlyByProject.get(name) || { name, confHours: 0, confCap: 0, pendHours: 0, pendCap: 0 }
+    existing.pendHours += e.hoursEstimated ?? 0
+    if (e.phaseAuto === 'application_development') existing.pendCap += e.hoursEstimated ?? 0
+    prevMonthlyByProject.set(name, existing)
   }
 
   // Daily breakdown — confirmed vs pending per day (UTC date string comparison)
@@ -228,7 +302,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       )}
 
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
@@ -268,9 +342,30 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </CardContent>
         </Card>
 
+        <Card className="sm:col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Last Week <span className="text-muted-foreground font-normal">({prevWeekRangeLabel})</span></CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {prevWkConfHours.toFixed(1)}h
+              {prevWkPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{prevWkPendHours.toFixed(1)}h pending</span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              <span className="text-green-600 font-medium">{prevWkConfCap.toFixed(1)}h</span> capitalizable
+              {prevWkPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{prevWkPendCap.toFixed(1)}h est.)</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">This Week <span className="text-muted-foreground font-normal">({tzShort})</span></CardTitle>
+            <CardTitle className="text-sm font-medium">This Week <span className="text-muted-foreground font-normal">({weekRangeLabel})</span></CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -291,7 +386,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">This Month <span className="text-muted-foreground font-normal">({tzShort})</span></CardTitle>
+            <CardTitle className="text-sm font-medium">{prevMonthLabel}</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {prevMoConfHours.toFixed(1)}h
+              {prevMoPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{prevMoPendHours.toFixed(1)}h pending</span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              <span className="text-green-600 font-medium">{prevMoConfCap.toFixed(1)}h</span> capitalizable
+              {prevMoPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{prevMoPendCap.toFixed(1)}h est.)</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">{currentMonthLabel}</CardTitle>
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -315,7 +431,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">
-            This Week — Daily Hours ({tzShort})
+            This Week — Daily Hours ({weekRangeLabel})
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -391,12 +507,71 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">
-              {format(now, 'MMMM yyyy')} — Hours by Project
+              {currentMonthLabel} — Hours by Project
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {[...monthlyByProject.values()]
+                .sort((a, b) => (b.confHours + b.pendHours) - (a.confHours + a.pendHours))
+                .map((p) => {
+                  const total = p.confHours + p.pendHours
+                  const totalCap = p.confCap + p.pendCap
+                  const capPct = total > 0 ? (totalCap / total) * 100 : 0
+                  const confPct = total > 0 ? (p.confHours / total) * 100 : 0
+                  return (
+                    <div key={p.name} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-medium">{p.name}</span>
+                        <span className="flex items-center gap-2">
+                          <span>{p.confHours.toFixed(1)}h</span>
+                          {p.pendHours > 0 && (
+                            <span className="text-amber-600 text-xs">+{p.pendHours.toFixed(1)}h pending</span>
+                          )}
+                          {totalCap > 0 && (
+                            <span className="text-green-600 text-xs">
+                              ({totalCap.toFixed(1)}h cap)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden flex">
+                        <div
+                          className="bg-green-500 h-full"
+                          style={{ width: `${Math.min(confPct, capPct)}%` }}
+                        />
+                        {confPct > capPct && (
+                          <div
+                            className="bg-muted-foreground/30 h-full"
+                            style={{ width: `${confPct - capPct}%` }}
+                          />
+                        )}
+                        {p.pendHours > 0 && (
+                          <div
+                            className="bg-amber-400/50 h-full"
+                            style={{ width: `${100 - confPct}%` }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Previous month breakdown by project — confirmed + pending */}
+      {prevMonthlyByProject.size > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              {prevMonthLabel} — Hours by Project
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {[...prevMonthlyByProject.values()]
                 .sort((a, b) => (b.confHours + b.pendHours) - (a.confHours + a.pendHours))
                 .map((p) => {
                   const total = p.confHours + p.pendHours

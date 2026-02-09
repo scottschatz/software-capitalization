@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireDeveloper } from '@/lib/get-developer'
+import { getDeveloper } from '@/lib/get-developer'
 
 export async function GET() {
-  const developer = await requireDeveloper()
-  if (developer.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+  const developer = await getDeveloper()
+  if (!developer || developer.role !== 'admin') {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
   }
 
   // Recent events (last 100)
@@ -51,9 +51,6 @@ export async function GET() {
   )].sort()
 
   // Consecutive fallback streak (from most recent)
-  const recentOutcomes = allRecent
-    .filter(e => e.eventType === 'success' || e.eventType === 'fallback')
-    .sort((a, b) => 0) // already sorted by the query, but just the relevant ones
   let consecutiveFallbacks = 0
   for (const e of recentEvents) {
     if (e.eventType === 'fallback') consecutiveFallbacks++

@@ -17,6 +17,13 @@
 - **Impact**: Without hooks, the system still works — agent sync provides session-level data. Hooks only add tool-level timing granularity.
 - **Added**: 2026-02-07
 
+### [MEDIUM] GPT-OSS crashes on specific inputs (Jan 22)
+- **Location**: `web/src/lib/ai/client.ts` — `callLocalModel()`
+- **Symptom**: Local model `gpt-oss-20b` consistently crashes with "Exit code: null" or "StopIteration" on Jan 22 input. Not a context size issue (prompt is only ~3674 tokens). Likely a model bug triggered by specific content.
+- **Workaround**: Circuit breaker detects the crash and falls back to Haiku automatically. Entry is generated successfully via fallback.
+- **Proper Fix**: Upstream model fix or switching to a more stable local model. Could also add input sanitization if specific content patterns are identified.
+- **Added**: 2026-02-09
+
 ### [MEDIUM] No post-release phase enforcement
 - **Location**: `web/src/lib/ai/prompts.ts`, project UI
 - **Symptom**: When a released project has significant new feature work, the system doesn't force creation of a new project phase (Phase 2, 3, etc.)
