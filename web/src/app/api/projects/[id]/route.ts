@@ -52,14 +52,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// PATCH /api/projects/[id] — Toggle monitoring or other quick updates (admin/manager only)
+// PATCH /api/projects/[id] — Toggle monitoring or other quick updates
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (!['admin', 'manager'].includes(developer.role)) {
-    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params

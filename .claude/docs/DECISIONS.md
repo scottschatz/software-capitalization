@@ -24,23 +24,29 @@ Use Prisma 7 with `prisma-client` generator and `@prisma/adapter-pg`. No `url` i
 
 ---
 
-## Immutable Raw Data via PostgreSQL Triggers
+## Three-Tier Data Immutability via PostgreSQL Triggers
 - **Date**: 2026-02-05
 - **Status**: Accepted
+- **Updated**: 2026-02-09 — Expanded to document three-tier model
 
 ### Context
-Raw session and commit data must be immutable for audit compliance (ASC 350-40).
+Raw session and commit data must be immutable for audit compliance (ASC 350-40). However, different tables have different update requirements — raw sessions need metric updates (sessions grow via context continuations), while entries need workflow updates (developer confirmation).
 
 ### Decision
-PostgreSQL `BEFORE UPDATE OR DELETE` triggers on raw_sessions, raw_commits, raw_vscode_activity tables that RAISE EXCEPTION.
+Three tiers of immutability, all enforced by PostgreSQL `BEFORE UPDATE/DELETE` triggers in `prisma/immutability_triggers.sql`:
+
+1. **Fully immutable** (no UPDATE, no DELETE): `raw_commits`, `raw_tool_events`, `raw_vscode_activity`, `daily_entry_revisions`, `manual_entry_revisions`, `project_history`
+2. **Identity-immutable** (identity fields locked, metrics updatable, DELETE blocked): `raw_sessions` — identity fields (`session_id`, `developer_id`, `project_path`, `started_at`, `is_backfill`) cannot change; metric fields can be updated on re-sync
+3. **Delete-protected** (UPDATE allowed, DELETE blocked): `daily_entries`, `manual_entries` — modified through confirmation workflow; every update creates an immutable revision record
 
 ### Alternatives
 1. **Prisma middleware (`$use`)**: Removed in Prisma 7
 2. **Application-level checks only**: Bypassable via direct DB access
+3. **Uniform full immutability for all tables**: Would block session re-sync and entry confirmation workflow
 
 ### Consequences
-- **Positive**: Database-level enforcement, cannot be bypassed by application bugs
-- **Negative**: Must use raw SQL for triggers, not captured in Prisma schema
+- **Positive**: Database-level enforcement applies regardless of access method (app, Prisma Studio, direct SQL); tiered model supports real workflows while protecting provenance
+- **Negative**: Must use raw SQL for triggers, not captured in Prisma schema; identity-immutable tier adds complexity to the trigger function
 
 ---
 
@@ -144,23 +150,29 @@ Use signed JWTs with 72-hour expiry embedded in GET URLs. Server verifies JWT an
 
 ---
 
-## Hooks + Agent Sync (Both Needed)
+## Agent as Primary, Hooks as Optional Enrichment
 - **Date**: 2026-02-06
 - **Status**: Accepted
+- **Updated**: 2026-02-09 — Clarified that agent is authoritative; hooks are optional
 
 ### Context
-Agent sync provides rich session summaries and git commit history but runs periodically (every 4 hours). Hooks can capture real-time tool events but lack broader context.
+Agent sync provides rich session summaries and git commit history but runs periodically (every 4 hours). Hooks can capture real-time tool events but lack broader context. Hook payloads are event-scoped — each fires with data for that specific event only (not the full transcript or conversation).
 
 ### Decision
-Keep both systems. Agent provides session summaries, git commits, user prompts, and tool breakdowns from JSONL parsing. Hooks provide individual tool events with precise timestamps for active coding time calculation.
+Agent (`cap sync`) is the **authoritative primary source**. It parses full JSONL session files (up to 192MB streamed) and git logs, extracting complete session metadata: duration, message counts, token usage, tool breakdown, files referenced, first user prompt, daily time breakdown. It works offline, handles backfill, and deduplicates on server.
+
+Hooks are **optional enrichment**. PostToolUse captures tool name + sanitized file paths (truncated to 500 chars). Stop captures session end timestamp. Both are fire-and-forget HTTP calls. Hooks do NOT capture: full tool output, conversation transcript, user messages, or Claude's reasoning.
+
+The system works fully without hooks. When hooks are active, tool event timestamps enable more precise gap-aware active time calculation.
 
 ### Alternatives
-1. **Hooks only**: Would miss git commits and session-level context
-2. **Agent only**: Would miss real-time tool-level granularity for active time calculation
+1. **Hooks only**: Would miss git commits, session-level context, and full session metadata; network-dependent with no backfill
+2. **Agent only**: Would miss real-time tool-level granularity for active time calculation; no immediate session end detection
+3. **Hooks sending full transcripts**: Impractical — JSONL files up to 192MB; real-time streaming during sessions would be disruptive; hook payloads don't include transcript data
 
 ### Consequences
-- **Positive**: Best of both — rich context from agent, precise timing from hooks
-- **Negative**: Two data collection paths to maintain; data feeds different tables (`raw_sessions` vs `raw_tool_events`)
+- **Positive**: Agent ensures reliability regardless of hook configuration; hooks add precision when available; configurable per-team
+- **Negative**: Two data collection paths to maintain; data feeds different tables (`raw_sessions` vs `raw_tool_events`); hooks require per-machine install (`cap hooks install`)
 
 ---
 
@@ -264,6 +276,47 @@ Use local LLM as primary for all AI calls (entry generation, work type classific
 ### Consequences
 - **Positive**: Zero marginal cost for most calls; Haiku fallback ensures reliability; full observability via model_events table
 - **Negative**: Two model paths to test; local model can produce different quality results (addressed by improved prompts)
+
+---
+
+## Management Authorization as Informational (Not Blocking)
+- **Date**: 2026-02-09
+- **Status**: Accepted
+
+### Context
+The system showed "Hours on this project cannot be capitalized until management authorization is documented" as a blocking amber warning. But the system is a time tracker, not an accounting system — developers classify what they think happened, and accounting makes the final capitalization determination.
+
+### Decision
+Reframe authorization as informational. Developers can confirm entries normally regardless of authorization status. Reports use `authorizationDate` to determine per-entry capitalization eligibility (date-aware — authorization on Feb 15 doesn't retroactively apply to January entries). Blue info banner replaces amber warning.
+
+### Alternatives
+1. **Blocking workflow**: Prevent entry confirmation until authorized — too disruptive, conflates tracker with accounting system
+2. **Ignore authorization entirely**: Loses ASU 2025-06 compliance tracking
+
+### Consequences
+- **Positive**: Developers aren't blocked; accounting gets the data they need from reports; date-aware means accurate per-entry classification
+- **Negative**: Reports may show entries as "expensed" that will later become capitalizable once authorization date is set
+
+---
+
+## Minimum Activity Threshold for Entry Generation
+- **Date**: 2026-02-09
+- **Status**: Accepted
+
+### Context
+AI generated 2.6h for "Amperwave Users" project on 2/5 with zero source sessions and commits. The zero-evidence guard existed but didn't fire because a session's projectPath matched the project's registered claude path — even though the session had trivial activity (brief directory open, no real work).
+
+### Decision
+Add a minimum activity threshold: if matched source sessions have < 3 messages AND < 5 min active time on the target date, flag the entry as `low_activity` instead of creating as pending. This catches "opened Claude Code in wrong directory" without blocking legitimate brief work sessions that have commits to back them up.
+
+### Alternatives
+1. **Stricter zero-evidence guard only**: Doesn't catch sessions with path match but trivial activity
+2. **Higher thresholds**: Risk flagging legitimate short sessions
+3. **Remove path-based matching entirely**: Too aggressive, would break legitimate entries
+
+### Consequences
+- **Positive**: Phantom entries from brief directory opens caught and flagged; commit-backed entries unaffected
+- **Negative**: Very short legitimate sessions (1-2 messages, no commits) will be flagged for review — acceptable tradeoff
 
 ---
 

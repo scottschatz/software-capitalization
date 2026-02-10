@@ -31,11 +31,14 @@ const phaseLabels: Record<string, string> = {
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ tab?: string }>
 }) {
   const developer = await requireDeveloper()
   const { id } = await params
+  const { tab } = await searchParams
 
   let project
   try {
@@ -131,7 +134,7 @@ export default async function ProjectDetailPage({
         </div>
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={tab || 'overview'}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
@@ -326,13 +329,21 @@ export default async function ProjectDetailPage({
                         >
                           {pcr.status}
                         </Badge>
+                        {pcr.effectiveDate && (
+                          <span className="text-sm text-muted-foreground">
+                            Effective: {format(new Date(pcr.effectiveDate), 'MMM d, yyyy')}
+                          </span>
+                        )}
                       </div>
                       <span className="text-xs text-muted-foreground">
                         {format(new Date(pcr.createdAt), 'MMM d, yyyy HH:mm')}
                       </span>
                     </div>
 
-                    <p className="text-sm">{pcr.reason}</p>
+                    <div className="rounded-md bg-muted/50 p-3">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Justification</p>
+                      <p className="text-sm">{pcr.reason}</p>
+                    </div>
 
                     <div className="text-xs text-muted-foreground">
                       Requested by {pcr.requestedBy.displayName}

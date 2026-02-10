@@ -68,8 +68,16 @@ export default async function ReviewPage({
     orderBy: [{ date: 'desc' }, { createdAt: 'asc' }],
   })
 
+  // Only show projects relevant to this developer (has entries, created, or has manual entries)
   const projects = await prisma.project.findMany({
-    where: { status: { not: 'abandoned' } },
+    where: {
+      status: { not: 'abandoned' },
+      OR: [
+        { dailyEntries: { some: { developerId: developer.id } } },
+        { manualEntries: { some: { developerId: developer.id } } },
+        { createdById: developer.id },
+      ],
+    },
     select: {
       id: true,
       name: true,

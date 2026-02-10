@@ -1,6 +1,6 @@
 {
   "name": "@townsquare/cap-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local agent for software capitalization data collection",
   "type": "module",
   "bin": {

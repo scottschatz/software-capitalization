@@ -31,7 +31,18 @@ export async function POST(request: NextRequest) {
     let created = 0
     let updated = 0
 
-    for (const disc of payload.projects) {
+    // Filter out non-project directories (home dirs, generic containers)
+    const validProjects = payload.projects.filter((disc) => {
+      // Skip if the name looks like a username or generic dir
+      const lowerName = disc.name.toLowerCase()
+      const genericNames = ['projects', 'repos', 'code', 'src', 'work', 'dev', 'workspace', 'workspaces']
+      if (genericNames.includes(lowerName)) return false
+      // Skip home directories: /home/<name> or /Users/<name> where name matches project name
+      if (disc.localPath.match(/^\/(?:home|Users)\/[^/]+$/) && disc.name === disc.localPath.split('/').pop()) return false
+      return true
+    })
+
+    for (const disc of validProjects) {
       // Check if project already exists by matching repo path, claude path, or repo URL
       const existingByRepo = disc.repoPath
         ? await prisma.projectRepo.findFirst({

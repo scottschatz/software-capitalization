@@ -20,32 +20,41 @@ Ideas and planned features organized by phase.
 | Daily Review UI | M | High | ✅ Shipped |
 | Email Notifications | M | Medium | ✅ Shipped |
 | Dashboard | M | Medium | ✅ Shipped |
-| Monthly Capitalization Report | L | High | 🔄 In Progress |
-| Unit Tests | M | High | 🔄 In Progress |
+| Monthly Capitalization Report | L | High | ✅ Shipped |
+| Unit Tests | M | High | ✅ Shipped |
 
 ## v1.0 — First Release
 
 | Feature | Complexity | Value | Status |
 |---------|------------|-------|--------|
-| Project Detail Report | M | High | ⬜ Backlog |
-| Unconfirmed Entries Report | S | Medium | ⬜ Backlog |
-| Team Management (Admin) | M | Medium | ⬜ Backlog |
-| Excel/CSV Export | M | High | ⬜ Backlog |
-| Reminder Emails (bulk) | S | Medium | ⬜ Backlog |
+| Project Detail Report | M | High | ✅ Shipped |
+| Unconfirmed Entries Report | S | Medium | ✅ Shipped |
+| Team Management (Admin) | M | Medium | ✅ Shipped |
+| Excel/CSV Export | M | High | ✅ Shipped |
+| Reminder Emails (bulk) | S | Medium | ✅ Shipped |
+| Claude Code Hooks (real-time) | M | High | ✅ Shipped |
+| MCP Server (Claude-native tools) | M | Medium | ✅ Shipped |
+| Enhancement Workflow (post-impl) | L | High | ✅ Shipped |
+| Date-Aware Authorization | M | High | ✅ Shipped |
+| Entry Generation Guards | M | High | ✅ Shipped |
+| Audit Hardening ($transaction, RBAC) | L | High | ✅ Shipped |
+| Onboarding Documentation | S | Medium | ✅ Shipped |
 
 ## v1.1 — Fast Follow
 
 | Feature | Complexity | Value | Status |
 |---------|------------|-------|--------|
 | VS Code/WakaTime Integration | M | Low | ⬜ Backlog |
-| Agent Error Handling + Retry | M | Medium | ⬜ Backlog |
+| Agent Error Handling + Retry | M | Medium | ✅ Shipped |
 | Agent Self-Update Check | S | Low | ⬜ Backlog |
-| systemd Timer Templates | S | Medium | ⬜ Backlog |
+| systemd Timer Templates | S | Medium | ✅ Shipped |
+| App Proxy / Reverse Proxy Setup | M | Medium | ⬜ Backlog |
 
 ## v2.0 — Future
 
 | Feature | Complexity | Value | Status |
 |---------|------------|-------|--------|
+| Project Doc Enrichment for AI Matching | S | Low | ⬜ Backlog |
 | ASU 2025-06 Dual Standard Support | XL | Medium | ⬜ Backlog |
 | Multi-Tenant Support | XL | Low | ⬜ Backlog |
 | Real-Time Dashboard (WebSocket) | M | Low | ⬜ Backlog |

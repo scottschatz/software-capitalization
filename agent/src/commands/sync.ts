@@ -7,9 +7,23 @@ import { fetchProjects, postSync, postDiscover, fetchAgentConfig, fetchLastSync,
 import type { SyncPayload, SyncSession, SyncCommit } from '../api-client.js'
 import { hostname, platform, release } from 'node:os'
 import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { updateTimers } from '../timer-updater.js'
+
+/** Get the configured user.email for a git repo (what git log --author should match). */
+function getRepoAuthorEmail(repoPath: string): string | null {
+  try {
+    return execFileSync('git', ['-C', repoPath, 'config', 'user.email'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim() || null
+  } catch {
+    return null
+  }
+}
 
 function compareVersions(a: string, b: string): number {
   const pa = a.split('.').map(Number)
@@ -178,10 +192,14 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         // Skip repo paths that don't exist on this machine (registered by another developer)
         if (!existsSync(repo.repoPath)) continue
 
+        // Use the repo's own git user.email for author filtering (more reliable than
+        // server email, which may differ from the developer's git config)
+        const repoEmail = getRepoAuthorEmail(repo.repoPath) || config.developerEmail || undefined
+
         const gitCommits = parseGitLog(repo.repoPath, {
           since: options.from ?? sinceDate?.toISOString(),
           until: options.to,
-          authorEmail: config.developerEmail || undefined,
+          authorEmail: repoEmail,
         })
 
         for (const gc of gitCommits) {

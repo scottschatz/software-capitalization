@@ -64,6 +64,7 @@ export type UpdateProjectInput = z.infer<typeof updateProjectSchema>
 export const phaseChangeRequestSchema = z.object({
   requestedPhase: z.enum(PROJECT_PHASES),
   reason: z.string().min(1, 'A reason for the phase change is required'),
+  effectiveDate: z.string().optional().nullable(), // ISO date string, defaults to today
 })
 
 export type PhaseChangeRequestInput = z.infer<typeof phaseChangeRequestSchema>

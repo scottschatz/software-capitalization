@@ -158,8 +158,8 @@ export default async function ProjectsPage({
                 <TableHead>Status</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Developers</TableHead>
-                {isManager && <TableHead className="text-center">Monitored</TableHead>}
-                {isManager && <TableHead className="text-right">Pending</TableHead>}
+                <TableHead className="text-center">Monitored</TableHead>
+                <TableHead className="text-right">Pending</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -214,7 +214,23 @@ export default async function ProjectsPage({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <PhaseBadge phase={project.phase} />
+                      <div className="flex items-center gap-1.5">
+                        <PhaseBadge phase={project.phase} />
+                        {(() => {
+                          const latestPcr = project.phaseChangeRequests[0]
+                          if (!latestPcr) return null
+                          if (latestPcr.status === 'pending') {
+                            return (
+                              <Link href={`/projects/${project.id}?tab=phase-changes`}>
+                                <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px] cursor-pointer hover:opacity-80">
+                                  Pending
+                                </Badge>
+                              </Link>
+                            )
+                          }
+                          return null
+                        })()}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={project.status} />
@@ -262,24 +278,22 @@ export default async function ProjectsPage({
                         )}
                       </div>
                     </TableCell>
-                    {isManager && (
-                      <TableCell className="text-center">
-                        <MonitoringToggle
-                          projectId={project.id}
-                          initialMonitored={project.monitored}
-                        />
-                      </TableCell>
-                    )}
-                    {isManager && (
-                      <TableCell className="text-right">
-                        {pendingCount > 0 && (
-                          <Badge variant="destructive" className="gap-1">
-                            <AlertCircle className="h-3 w-3" />
-                            {pendingCount}
-                          </Badge>
+                    <TableCell className="text-center">
+                      <MonitoringToggle
+                        projectId={project.id}
+                        initialMonitored={project.monitored}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {pendingCount > 0 && (
+                          <Link href={`/projects/${project.id}?tab=phase-changes`}>
+                            <Badge variant="destructive" className="gap-1 cursor-pointer hover:opacity-80">
+                              <AlertCircle className="h-3 w-3" />
+                              {pendingCount}
+                            </Badge>
+                          </Link>
                         )}
-                      </TableCell>
-                    )}
+                    </TableCell>
                   </TableRow>
                 )
               })}

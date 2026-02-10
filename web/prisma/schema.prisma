@@ -384,6 +384,7 @@ model PhaseChangeRequest {
   currentPhase    String    @map("current_phase")
   requestedPhase  String    @map("requested_phase")
   reason          String
+  effectiveDate   DateTime? @map("effective_date") @db.Date // Requested effective date for the phase transition
   status          String    @default("pending") // pending | approved | rejected
   reviewedById    String?   @map("reviewed_by_id")
   reviewedAt      DateTime? @map("reviewed_at")

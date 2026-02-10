@@ -309,6 +309,11 @@ export async function listProjects(query: ListProjectsQuery = {}) {
       claudePaths: true,
       parentProject: { select: { id: true, name: true } },
       createdBy: { select: { id: true, displayName: true } },
+      phaseChangeRequests: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { id: true, status: true, requestedPhase: true, createdAt: true },
+      },
       _count: {
         select: {
           phaseChangeRequests: { where: { status: 'pending' } },
@@ -352,6 +357,7 @@ export async function requestPhaseChange(
       currentPhase: project.phase,
       requestedPhase: input.requestedPhase,
       reason: input.reason,
+      effectiveDate: input.effectiveDate ? new Date(input.effectiveDate) : new Date(),
       status: 'pending',
     },
     include: {
@@ -413,10 +419,22 @@ export async function approvePhaseChange(
       },
     })
 
-    // Apply the phase change
+    // Apply the phase change + auto-set related fields
+    const projectUpdate: Record<string, unknown> = {
+      phase: request.requestedPhase,
+      phaseEffectiveDate: request.effectiveDate ?? new Date(),
+    }
+    if (request.requestedPhase === 'application_development') {
+      projectUpdate.managementAuthorized = true
+      projectUpdate.probableToComplete = true
+      projectUpdate.authorizationDate = request.effectiveDate ?? new Date()
+    }
+    if (request.requestedPhase === 'post_implementation') {
+      projectUpdate.goLiveDate = request.effectiveDate ?? new Date()
+    }
     await tx.project.update({
       where: { id: projectId },
-      data: { phase: request.requestedPhase },
+      data: projectUpdate,
     })
 
     // Record in history
@@ -431,8 +449,7 @@ export async function approvePhaseChange(
     })
 
     // Cascade phase to all entries (including confirmed) after effective date
-    const project = await tx.project.findUniqueOrThrow({ where: { id: projectId } })
-    const effectiveDate = project.phaseEffectiveDate ?? new Date()
+    const effectiveDate = request.effectiveDate ?? new Date()
     await cascadePhaseToEntries(tx, projectId, request.requestedPhase, effectiveDate, reviewerId)
 
     return updated

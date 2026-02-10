@@ -99,6 +99,10 @@ export function SystemHealthClient() {
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState<string | null>(null) // date being generated
   const [generateResult, setGenerateResult] = useState<{ date: string; message: string } | null>(null)
+  const [bulkFrom, setBulkFrom] = useState('')
+  const [bulkTo, setBulkTo] = useState('')
+  const [bulkGenerating, setBulkGenerating] = useState(false)
+  const [bulkResult, setBulkResult] = useState<{ message: string; isError: boolean } | null>(null)
 
   const fetchData = useCallback(() => {
     Promise.all([
@@ -151,6 +155,40 @@ export function SystemHealthClient() {
       })
     } finally {
       setGenerating(null)
+    }
+  }
+
+  const handleBulkGenerate = async () => {
+    if (!bulkFrom || !bulkTo) return
+    setBulkGenerating(true)
+    setBulkResult(null)
+    try {
+      const res = await fetch('/api/entries/generate-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: bulkFrom, to: bulkTo }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      }
+      const result = await res.json()
+      setBulkResult({
+        message: `Generated ${result.totalEntriesCreated} entries across ${result.daysProcessed} days${result.totalErrors > 0 ? ` (${result.totalErrors} errors)` : ''}`,
+        isError: false,
+      })
+      // Refresh pipeline data
+      fetch('/api/admin/pipeline-status')
+        .then(r => r.json())
+        .then(setPipelineData)
+        .catch(() => {})
+    } catch (e) {
+      setBulkResult({
+        message: `Error: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        isError: true,
+      })
+    } finally {
+      setBulkGenerating(false)
     }
   }
 
@@ -418,6 +456,54 @@ export function SystemHealthClient() {
           </CardContent>
         </Card>
       )}
+
+      {/* Bulk Generate */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Bulk Generate Entries</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Generate AI-summarized daily entries for a date range. Use this to backfill entries
+            for new developers or missed dates.
+          </p>
+          <div className="flex items-end gap-3">
+            <div>
+              <label className="text-sm font-medium">From</label>
+              <input
+                type="date"
+                value={bulkFrom}
+                onChange={(e) => setBulkFrom(e.target.value)}
+                className="block mt-1 rounded-md border px-3 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">To</label>
+              <input
+                type="date"
+                value={bulkTo}
+                onChange={(e) => setBulkTo(e.target.value)}
+                className="block mt-1 rounded-md border px-3 py-1.5 text-sm"
+              />
+            </div>
+            <Button
+              onClick={handleBulkGenerate}
+              disabled={bulkGenerating || !bulkFrom || !bulkTo}
+            >
+              {bulkGenerating ? 'Generating...' : 'Generate Range'}
+            </Button>
+          </div>
+          {bulkResult && (
+            <div className={`rounded-lg border p-3 text-sm ${
+              bulkResult.isError
+                ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200'
+                : 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200'
+            }`}>
+              {bulkResult.message}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Alert if consecutive fallbacks */}
       {stats.consecutiveFallbacks >= 3 && (

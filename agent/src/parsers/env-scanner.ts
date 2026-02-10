@@ -56,6 +56,9 @@ export function discoverProjects(
         continue
       }
 
+      // Skip non-project directories (home dirs, generic parent dirs)
+      if (isNonProjectPath(localPath)) continue
+
       // Skip if already discovered from another dir
       if (discovered.has(localPath)) continue
 
@@ -111,6 +114,28 @@ export function discoverProjects(
   }
 
   return Array.from(discovered.values()).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Filter out paths that are clearly not project directories:
+ * - Home directories (/home/user, /Users/user)
+ * - Generic parent directories (~/projects, ~/repos, ~/code, ~/src, ~/work, ~/dev)
+ * - Root-level system directories
+ */
+function isNonProjectPath(localPath: string): boolean {
+  const home = homedir()
+  // Exact home directory
+  if (localPath === home) return true
+  // One level above: /home or /Users
+  const parent = localPath.replace(/\/[^/]+$/, '')
+  if (parent === '/home' || parent === '/Users') return true
+  // Generic container directories directly under home
+  const rel = localPath.startsWith(home + '/') ? localPath.slice(home.length + 1) : null
+  if (rel && !rel.includes('/')) {
+    const genericDirs = ['projects', 'repos', 'code', 'src', 'work', 'dev', 'workspace', 'workspaces']
+    if (genericDirs.includes(rel.toLowerCase())) return true
+  }
+  return false
 }
 
 function resolveClaudeDir(claudeDataDir?: string): string {

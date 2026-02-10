@@ -19,7 +19,7 @@
 | Forms | React Hook Form | 7.71.1 | Form state management |
 | Agent CLI | Commander.js | 14.0.0 | CLI framework |
 | MCP | @modelcontextprotocol/sdk | 1.x | Claude-native tool access |
-| Testing | Vitest | 3.x | Unit testing (114 tests) |
+| Testing | Vitest | 3.x | Unit testing (311 test cases) |
 | Language | TypeScript | 5.x | Type safety |
 | Runtime | Node.js | 20.19 | Server runtime |
 
@@ -36,7 +36,7 @@ software-capitalization/
 │   └── tasks/                # Task board
 ├── web/                      # Next.js 16 application
 │   ├── prisma/
-│   │   ├── schema.prisma     # 22 models
+│   │   ├── schema.prisma     # 26 models
 │   │   ├── immutability_triggers.sql
 │   │   └── migrations/
 │   └── src/
@@ -48,7 +48,7 @@ software-capitalization/
 │       │   │   ├── reports/          # Monthly reports, project detail, unconfirmed
 │       │   │   ├── settings/         # Agent key management, system health (admin)
 │       │   │   └── team/             # Team admin (developer management)
-│       │   ├── api/                  # 30+ API routes
+│       │   ├── api/                  # 52 API routes
 │       │   │   ├── agent/            # sync, projects, last-sync, discover, hooks/*, entries/*, hours, activity
 │       │   │   ├── auth/             # NextAuth
 │       │   │   ├── email-reply/      # approve, inbound
@@ -134,28 +134,64 @@ software-capitalization/
 - **Tools**: get_my_hours, get_projects, get_pending_entries, confirm_entries, log_manual_time, get_activity_summary
 - **Design**: Thin proxy to web API, no direct DB access
 
+## Data Collection Architecture
+
+The system collects developer activity through two complementary mechanisms:
+
+### Cap Agent (Primary — Batch Sync)
+The `cap sync` CLI is the **authoritative data source**. Runs on schedule (every 4h via cron) or on demand.
+
+| Data Source | What It Captures | Stored In |
+|-------------|-----------------|-----------|
+| Claude Code JSONL files | Session metadata: duration, message counts, token usage, tool breakdown, files referenced, first user prompt, daily time breakdown | `raw_sessions` |
+| Git repositories | Commit hash, author, timestamp, message, file change stats (insertions/deletions) | `raw_commits` |
+
+Key properties: works offline, handles backfill, deduplicates on server, no external dependencies.
+
+### Claude Code Hooks (Optional — Real-Time Events)
+Installed via `cap hooks install`. Registers shell scripts in `~/.claude/settings.json`.
+
+| Hook Event | What It Captures | Stored In |
+|------------|-----------------|-----------|
+| PostToolUse | Tool name, sanitized file paths, truncated commands (500 char max) | `raw_tool_events` |
+| Stop | Session end timestamp | Updates `raw_sessions.ended_at` |
+
+**Does NOT capture:** Full tool output, conversation transcript, user messages, or Claude's reasoning. Hook payloads are event-scoped — each hook fires with data for that specific event only.
+
+**Advantages:** Real-time timestamps enable more precise active time calculation; session end detected immediately.
+**Limitations:** Network dependent (events lost if server unreachable), no backfill, requires per-machine setup.
+
+Both mechanisms feed into immutable raw data tables (see Immutability section below).
+
+## Data Immutability
+
+Enforced by PostgreSQL `BEFORE UPDATE/DELETE` triggers in `prisma/immutability_triggers.sql`. Rules apply regardless of access method (app, Prisma Studio, direct SQL).
+
+| Tier | Tables | Rule | Rationale |
+|------|--------|------|-----------|
+| Fully immutable | `raw_commits`, `raw_tool_events`, `raw_vscode_activity`, `daily_entry_revisions`, `manual_entry_revisions`, `project_history` | No UPDATE, no DELETE | Write-once source evidence and audit logs |
+| Identity-immutable | `raw_sessions` | Identity fields locked (`session_id`, `developer_id`, `project_path`, `started_at`, `is_backfill`); metric fields updatable; DELETE blocked | Sessions grow via context continuations — metrics must be updatable on re-sync without changing provenance |
+| Delete-protected | `daily_entries`, `manual_entries` | UPDATE allowed (workflow), DELETE blocked | Entries are modified through confirmation workflow; every update creates an immutable revision record |
+
 ## Data Flow
 
 ```
-1. Data Collection (3 sources)
-   Claude Code sessions → JSONL files (~/.claude/projects/)
-   Claude Code hooks → POST /api/agent/hooks/tool-event (real-time)
-   Git repos → git log
+1. Data Collection
+   Agent (primary):  JSONL files + git log → cap sync → POST /api/agent/sync → raw_sessions + raw_commits
+   Hooks (optional): PostToolUse → POST /api/agent/hooks/tool-event → raw_tool_events
+                     Stop → POST /api/agent/hooks/session-event → raw_sessions.ended_at
 
-2. Agent Sync (manual or cron, every 4 hours)
-   cap sync → parse JSONL + git → POST /api/agent/sync → raw_sessions + raw_commits
-
-3. AI Entry Generation (systemd timer, 7 AM ET)
+2. AI Entry Generation (systemd timer, 7 AM ET)
    Queries raw_sessions + raw_commits + raw_tool_events by developer+date
-   → Claude Sonnet generates entries with hours/phase/summary
+   → Local LLM (primary) or Anthropic Haiku (fallback) generates entries
    → daily_entries (status: pending)
 
-4. Developer Review (email at 8 AM ET or web UI or MCP)
+3. Developer Review (email at 8 AM ET or web UI or MCP)
    "Approve All" email button → GET /api/email-reply/approve → confirmed
    Web UI → PATCH /api/entries/[id]/confirm → confirmed
    MCP tool → POST /api/agent/entries/confirm → confirmed
 
-5. Reporting
+4. Reporting
    Monthly reports aggregate confirmed daily_entries + manual_entries
 ```
 
@@ -175,7 +211,7 @@ software-capitalization/
 - **Daily Entries**: DailyEntry, ManualEntry, DailyEntryRevision, ManualEntryRevision
 - **Email**: EmailLog, EmailReply
 - **Reports**: MonthlyReport, MonthlyExecutiveSummary
-- **Operational**: ModelEvent, PeriodLock
+- **Operational**: ModelEvent, SystemSetting, PeriodLock
 
 ## Environment Variables
 

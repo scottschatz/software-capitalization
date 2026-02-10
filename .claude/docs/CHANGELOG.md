@@ -2,6 +2,47 @@
 
 All notable changes documented here.
 
+## [0.8.1] - 2026-02-09
+
+### Added — Dashboard Reorganization & Documentation
+- **Dashboard Card Grouping**: Reorganized 6 stat cards from 3-col interleaved grid to 2-col grouped layout: status (Pending Review | Active Projects), weekly (This Week | Last Week), monthly (Current Month | Previous Month)
+- **Pipeline Developer Name**: Single-developer pipeline rows now show developer name inline next to date; multi-developer rows still show "(N developers)" with expandable sub-rows
+- **Methodology: Data Collection Architecture** (4 new sections): Source 1 (Cap Agent), Source 2 (Hooks), Source 3 (Git), with detailed field-by-field lists of what each captures, advantages, limitations, and why the agent is primary
+- **Methodology: Data Immutability** (new section): Three-tier immutability model — fully immutable (raw_commits, raw_tool_events, revision tables), identity-immutable (raw_sessions), delete-protected (daily_entries, manual_entries) — with enforcement mechanism details
+- **Controls Summary**: Expanded from 2 immutability rows to 4 (immutable source data, identity-locked sessions, delete-protected entries, complete revision history)
+- **ARCHITECTURE.md**: New "Data Collection Architecture" section with comparison tables; new "Data Immutability" section with tier/table/rule/rationale table
+
+### Changed
+- **ARCHITECTURE.md Data Flow**: Updated to distinguish agent (primary) vs hooks (optional) data paths
+
+---
+
+## [0.8.0] - 2026-02-09
+
+### Added — Enhancement Workflow, Authorization, Onboarding, Generation Guards
+- **Post-Implementation Entry Reclassification**: When a project moves to post-implementation phase, pending entries are auto-reclassified and flagged with enhancement suggestion
+- **Entry Reassignment APIs**: `PATCH /api/entries/[id]/reassign` (individual) and `PATCH /api/entries/reassign-bulk` (bulk) for moving entries to enhancement projects
+- **Enhancement Picker UI**: `EnhancementReassignPanel` on entry cards with dropdown picker; `BulkReassignBanner` in review page for grouped flagged entries
+- **Date-Aware Authorization**: `authorizationDate` field determines which entries qualify for capitalization — entries before the authorization date are classified as expensed in reports
+- **Minimum Activity Threshold**: Entries with < 3 messages AND < 5 min active time flagged as `low_activity` instead of created as pending — prevents phantom entries from brief directory opens
+- **README Quick Start**: "Let Claude Set It Up" section with copy-paste prompt; all-in-one bash setup block; verify/troubleshooting sections
+- **`.env.example`**: Created with safe placeholder values; `.gitignore` updated to track it
+- **Projects Guide Component**: `projects-guide.tsx` with management authorization explanation
+- **Developer Filter Component**: `developer-filter.tsx` for projects page
+- **Loading Skeletons**: Added to projects, reports, review, and team pages
+
+### Changed
+- **Management Authorization**: Reframed from blocking amber warning to informational blue banner — developers confirm entries normally, accounting makes final determination
+- **Report Capitalization**: Date-aware check using `authorizationDate` in query-builder.ts for both daily and manual entries
+- **Entry Card Authorization Hints**: Shows context-specific hints ("pending authorization", "before authorization date", "completion not assessed")
+- **Audit Hardening (Waves 1-7)**: All mutating API endpoints wrapped in `$transaction`, role-based access control, period lock checks, revision audit trails
+- **Team Page**: Extracted to client component (`team-client.tsx`)
+
+### Fixed
+- **Phantom Entries**: AI-generated entries for projects with no real activity now caught by zero-evidence guard + minimum activity threshold (e.g., 2.6h Amperwave Users entry with 0 sources)
+
+---
+
 ## [0.7.0] - 2026-02-09
 
 ### Added — Local LLM Support & Model Health Monitoring
@@ -14,6 +55,8 @@ All notable changes documented here.
 - **Expense Hours in Day Header**: Day accordion header now shows expense hours alongside total and capitalizable
 - **Special Token Stripping**: Strips `<|...|>` control tokens (gpt-oss/vLLM) and `<think>` blocks (Qwen3/DeepSeek-R1) from model responses
 - **Regeneration Scripts**: `scripts/regenerate-with-local-llm.ts` for full model comparison, `scripts/regen-targeted.ts` for specific dates, `scripts/measure-prompt-size.ts` for context window analysis
+- **Dashboard: Last Week/Month Cards**: 6 stat cards (Active Projects, Pending Review, Last Week, This Week, Last Month, This Month) with date ranges and month names
+- **Dashboard: Prior Month Project Breakdown**: Previous month hours-by-project section with confirmed/pending/capitalizable bars
 
 ### Changed
 - **AI Prompt (Commit-Only Projects)**: Conservative guidance — LOC does not equal hours; generated code, migrations, schema dumps can add thousands of lines in minutes
@@ -23,6 +66,9 @@ All notable changes documented here.
 
 ### Fixed
 - **Jan 30 Over-Estimation**: GPT-OSS estimated 13.2h due to high LOC in auto-generated code; improved prompt reduced to 3.8h
+- **Sidebar Double-Highlighting**: `/settings/system-health` no longer highlights both "Settings" and "System Health" — uses most-specific-match logic
+- **Model Health API 500**: Switched from `requireDeveloper()` to `getDeveloper()` in Route Handler (redirect() crashes in API routes)
+- **Dashboard Month Label Timezone Bug**: Previous month showed "December" instead of "January" due to `date-fns format()` using local time on UTC midnight dates — now uses UTC-safe month name computation
 
 ---
 

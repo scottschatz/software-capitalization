@@ -46,11 +46,9 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
   const [effectiveDate, setEffectiveDate] = useState(
     new Date().toISOString().split('T')[0]
   )
-  const [goLiveDate, setGoLiveDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const availablePhases = allPhases.filter((p) => p !== currentPhase)
-  const showGoLiveDate = requestedPhase === 'post_implementation'
 
   async function handleSubmit() {
     if (!requestedPhase || !reason.trim()) {
@@ -69,7 +67,7 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
           newPhase: requestedPhase,
           reason,
           effectiveDate: effectiveDate || null,
-          goLiveDate: showGoLiveDate ? (goLiveDate || effectiveDate || null) : null,
+          goLiveDate: requestedPhase === 'post_implementation' ? (effectiveDate || null) : null,
         }),
       })
 
@@ -83,7 +81,7 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
           const reqRes = await fetch(`/api/projects/${projectId}/phase-change`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestedPhase, reason }),
+            body: JSON.stringify({ requestedPhase, reason, effectiveDate: effectiveDate || null }),
           })
 
           if (!reqRes.ok) {
@@ -97,7 +95,6 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
           setOpen(false)
           setRequestedPhase('')
           setReason('')
-          setGoLiveDate('')
           setSubmitting(false)
           router.refresh()
           return
@@ -114,7 +111,7 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
       const res = await fetch(`/api/projects/${projectId}/phase-change`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestedPhase, reason }),
+        body: JSON.stringify({ requestedPhase, reason, effectiveDate: effectiveDate || null }),
       })
 
       if (!res.ok) {
@@ -130,7 +127,6 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
     setOpen(false)
     setRequestedPhase('')
     setReason('')
-    setGoLiveDate('')
     setSubmitting(false)
     router.refresh()
   }
@@ -172,43 +168,30 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
             </Select>
           </div>
 
-          {isAdmin && (
-            <div className="space-y-2">
-              <Label>Effective Date</Label>
-              <Input
-                type="date"
-                value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                When this phase becomes effective. Defaults to today.
-              </p>
-            </div>
-          )}
-
-          {isAdmin && showGoLiveDate && (
-            <div className="space-y-2">
-              <Label>Go-Live Date</Label>
-              <Input
-                type="date"
-                value={goLiveDate || effectiveDate}
-                onChange={(e) => setGoLiveDate(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                When the project entered production. This marks the start of depreciation.
-                Defaults to the effective date.
-              </p>
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label>Effective Date</Label>
+            <Input
+              type="date"
+              value={effectiveDate}
+              onChange={(e) => setEffectiveDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              When this phase becomes effective. Defaults to today.
+            </p>
+          </div>
 
           <div className="space-y-2">
-            <Label>Reason for Change</Label>
+            <Label>Justification <span className="text-destructive">*</span></Label>
             <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Explain why this project should move to the new phase..."
               rows={3}
+              required
             />
+            <p className="text-xs text-muted-foreground">
+              Required. This will be shown to the reviewer for approval.
+            </p>
           </div>
 
           <div className="text-xs text-muted-foreground space-y-1">

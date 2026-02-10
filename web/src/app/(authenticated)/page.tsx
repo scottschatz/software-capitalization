@@ -87,6 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   const [
     projectCount,
+    trackedProjectCount,
     pendingEntries,
     recentSyncs,
     pendingPhaseChanges,
@@ -100,7 +101,39 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     prevMonthlyConfirmed,
     prevMonthlyPending,
   ] = await Promise.all([
-    prisma.project.count({ where: { status: 'active' } }),
+    prisma.project.count({
+      where: {
+        status: 'active',
+        ...(targetDevId
+          ? {
+              OR: [
+                { dailyEntries: { some: { developerId: targetDevId } } },
+                { manualEntries: { some: { developerId: targetDevId } } },
+                { createdById: targetDevId },
+              ],
+            }
+          : {}),
+      },
+    }),
+    // "Tracked" = projects with actual entries (daily or manual) for this developer
+    prisma.project.count({
+      where: {
+        status: 'active',
+        ...(targetDevId
+          ? {
+              OR: [
+                { dailyEntries: { some: { developerId: targetDevId } } },
+                { manualEntries: { some: { developerId: targetDevId } } },
+              ],
+            }
+          : {
+              OR: [
+                { dailyEntries: { some: {} } },
+                { manualEntries: { some: {} } },
+              ],
+            }),
+      },
+    }),
     prisma.dailyEntry.count({
       where: { ...devFilter, status: 'pending' },
     }),
@@ -328,11 +361,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
+            <CardTitle className="text-sm font-medium">Projects</CardTitle>
             <FolderKanban className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{projectCount}</div>
+            <div className="text-2xl font-bold">
+              {trackedProjectCount}
+              <span className="text-sm font-normal text-muted-foreground ml-1">tracked</span>
+            </div>
+            {projectCount > trackedProjectCount && (
+              <p className="text-xs text-muted-foreground">
+                {projectCount} total ({projectCount - trackedProjectCount} unmonitored)
+              </p>
+            )}
             <Link
               href="/projects"
               className="text-xs text-muted-foreground hover:underline inline-flex items-center gap-1 mt-1"

@@ -24,12 +24,13 @@
 - **Proper Fix**: Upstream model fix or switching to a more stable local model. Could also add input sanitization if specific content patterns are identified.
 - **Added**: 2026-02-09
 
-### [MEDIUM] No post-release phase enforcement
+### [LOW] No post-release phase enforcement
 - **Location**: `web/src/lib/ai/prompts.ts`, project UI
-- **Symptom**: When a released project has significant new feature work, the system doesn't force creation of a new project phase (Phase 2, 3, etc.)
-- **Workaround**: Manually create new project phases for post-release feature development
-- **Proper Fix**: Detect new feature work on released projects during entry generation and prompt/require phase creation
+- **Symptom**: When a released project has significant new feature work, the system doesn't force creation of a new project phase
+- **Workaround**: Enhancement workflow now auto-flags entries on post-impl projects with active development work; bulk reassignment banner helps move entries to enhancement projects
+- **Proper Fix**: Could add proactive enforcement that requires phase creation before confirming flagged enhancement entries
 - **Added**: 2026-02-06
+- **Updated**: 2026-02-09 — Severity reduced from MEDIUM to LOW; enhancement workflow partially addresses this
 
 ### [LOW] Empty catch blocks in parsers
 - **Location**: `agent/src/parsers/git-log.ts`, `agent/src/parsers/claude-jsonl.ts`, `agent/src/parsers/claude-scanner.ts`
