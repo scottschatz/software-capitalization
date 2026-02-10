@@ -293,7 +293,13 @@ export async function listProjects(query: ListProjectsQuery = {}) {
   }
 
   if (query.developerId) {
-    where.dailyEntries = { some: { developerId: query.developerId } }
+    // Show projects where the developer has entries, created the project, or discovered it
+    where.OR = [
+      ...(where.OR ?? []),
+      { dailyEntries: { some: { developerId: query.developerId } } },
+      { manualEntries: { some: { developerId: query.developerId } } },
+      { createdById: query.developerId },
+    ]
   }
 
   return prisma.project.findMany({

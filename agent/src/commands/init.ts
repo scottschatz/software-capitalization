@@ -66,17 +66,22 @@ export async function initCommand(): Promise<void> {
   const developerEmail = serverEmail
     ? await prompt(rl, 'Your email', serverEmail)
     : await prompt(rl, 'Your email')
-  console.log('\nClaude Code stores session logs in ~/.claude/projects/ (not your source code folder).')
+  console.log('\nThe next two prompts configure where the agent looks for data:')
+  console.log('  1. Claude session logs — where Claude Code saves conversation history (default is fine)')
+  console.log('  2. Code/git folders — your actual source code directories (prompted next)')
+  console.log()
+  console.log('Claude Code stores session logs in ~/.claude/projects/ (not your source code folder).')
   const claudeDataDir = await prompt(rl, 'Claude Code session log directory', '~/.claude/projects')
 
-  // Additional monitored directories
-  console.log('\nMonitor additional directories? (one per line, blank line to finish)')
-  console.log('  Examples: ~/work/.claude/projects, ~/personal/.claude/projects')
+  // Additional source code directories to monitor for git activity
+  console.log('\nNow: which folders contain your source code? The agent auto-scans ~/projects/')
+  console.log('by default. Add extra directories here if you have code elsewhere.')
+  console.log('  Examples: ~/work, ~/personal/code')
   const extraDirs: string[] = []
-  let dir = await prompt(rl, 'Additional directory (blank to skip)')
+  let dir = await prompt(rl, 'Additional code directory (blank to skip)')
   while (dir) {
     extraDirs.push(dir)
-    dir = await prompt(rl, 'Additional directory (blank to finish)')
+    dir = await prompt(rl, 'Additional code directory (blank to finish)')
   }
 
   const claudeDataDirs = [claudeDataDir, ...extraDirs]
