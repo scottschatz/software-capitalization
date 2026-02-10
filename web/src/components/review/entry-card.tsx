@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { Slider } from '@/components/ui/slider'
-import { CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle, Cpu, Cloud, GitCommit, MessageSquare, Pencil, SlidersHorizontal, ArrowRight, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle, Cpu, Cloud, GitCommit, MessageSquare, Pencil, SlidersHorizontal, ArrowRight, Loader2, Plus } from 'lucide-react'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { DataQualityIndicators } from './data-quality-indicators'
 import type { SerializedEntry, EnhancementProject } from './review-page-client'
@@ -170,6 +170,11 @@ export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: E
     Math.abs(hours - entry.hoursEstimated) / entry.hoursEstimated > 0.2
   const needsReason = hoursChanged && !adjustmentReason.trim()
 
+  // Phase mismatch: developer is overriding to a phase that contradicts the project's current phase
+  const projectPhase = proj?.phase ?? entry.project?.phase
+  const phaseContradiction = projectPhase && phase !== projectPhase
+  const capitalizingPostImpl = projectPhase === 'post_implementation' && phase === 'application_development'
+
   // Detect overrides from AI originals (for confirmed entries)
   const overrides: string[] = []
   if (isConfirmed) {
@@ -188,6 +193,10 @@ export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: E
   async function handleConfirm() {
     if (needsReason) {
       toast.error('Please provide a reason for the hours adjustment (>20% change)')
+      return
+    }
+    if (capitalizingPostImpl) {
+      toast.error('To capitalize post-implementation work, reassign this entry to an enhancement project using the panel below the phase selector.')
       return
     }
 
@@ -399,6 +408,23 @@ export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: E
                 <SelectItem value="post_implementation">Post-Implementation (Expensed)</SelectItem>
               </SelectContent>
             </Select>
+            {capitalizingPostImpl && !isConfirmed && (
+              <PostImplEnhancementPanel
+                entryId={entry.id}
+                projectId={projectId}
+                projectName={proj?.name ?? entry.project?.name ?? 'Unknown'}
+                enhancements={enhancements}
+                onReassigned={() => {
+                  onConfirmed?.(entry.id)
+                  router.refresh()
+                }}
+              />
+            )}
+            {phaseContradiction && !capitalizingPostImpl && !isConfirmed && (
+              <p className="text-xs text-muted-foreground">
+                Phase differs from project ({PHASE_LABELS[projectPhase] ?? projectPhase}).
+              </p>
+            )}
           </div>
         </div>
 
@@ -733,6 +759,201 @@ function EnhancementReassignPanel({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Post-Implementation Enhancement Panel
+// (shown inline when developer selects capitalizable on post-impl project)
+// ============================================================
+
+function PostImplEnhancementPanel({
+  entryId,
+  projectId,
+  projectName,
+  enhancements,
+  onReassigned,
+}: {
+  entryId: string
+  projectId: string
+  projectName: string
+  enhancements: EnhancementProject[]
+  onReassigned: () => void
+}) {
+  const [selectedEnhancement, setSelectedEnhancement] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [newLabel, setNewLabel] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  async function handleReassign() {
+    if (!selectedEnhancement) {
+      toast.error('Select an enhancement project first')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/entries/${entryId}/reassign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enhancementProjectId: selectedEnhancement }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        toast.error(err.error || 'Failed to reassign entry')
+        return
+      }
+      toast.success('Entry moved to enhancement project')
+      onReassigned()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleCreateAndReassign() {
+    if (!newLabel.trim()) {
+      toast.error('Please provide an enhancement label')
+      return
+    }
+    setCreating(true)
+    try {
+      // 1. Create the enhancement project
+      const createRes = await fetch(`/api/projects/${projectId}/enhancements`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enhancementLabel: newLabel,
+          description: newDescription || null,
+        }),
+      })
+      if (!createRes.ok) {
+        const err = await createRes.json()
+        toast.error(err.error || 'Failed to create enhancement project')
+        return
+      }
+      const newProject = await createRes.json()
+
+      // 2. Reassign this entry to the new enhancement
+      const reassignRes = await fetch(`/api/entries/${entryId}/reassign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enhancementProjectId: newProject.id }),
+      })
+      if (!reassignRes.ok) {
+        const err = await reassignRes.json()
+        toast.error(err.error || 'Enhancement created but entry reassignment failed')
+        return
+      }
+
+      toast.success(`Enhancement "${newProject.name}" created and entry moved`)
+      onReassigned()
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs">
+      <p className="font-medium text-amber-800 mb-1">
+        New feature work on a post-implementation project?
+      </p>
+      <p className="text-amber-700 mb-2">
+        Under ASC 350-40, new development must be tracked as a separate enhancement project.
+        Select an existing one or create a new one to move this entry.
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {enhancements.length > 0 && (
+          <>
+            <Select value={selectedEnhancement} onValueChange={setSelectedEnhancement}>
+              <SelectTrigger className="w-[220px] h-7 text-xs">
+                <SelectValue placeholder="Select enhancement..." />
+              </SelectTrigger>
+              <SelectContent>
+                {enhancements.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.enhancementLabel ?? e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="default"
+              disabled={!selectedEnhancement || submitting}
+              onClick={handleReassign}
+              className="h-7 text-xs"
+            >
+              {submitting ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <ArrowRight className="h-3 w-3 mr-1" />
+              )}
+              Move
+            </Button>
+          </>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setShowCreate(!showCreate)}
+          className="h-7 text-xs"
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          New Enhancement
+        </Button>
+      </div>
+
+      {showCreate && (
+        <div className="mt-3 p-2 bg-white rounded border space-y-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Enhancement Label</Label>
+            <Input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="e.g., Phase 2 - New Integrations"
+              className="h-7 text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Creates: &quot;{projectName} - {newLabel || '...'}&quot;
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Description (optional)</Label>
+            <Input
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="Describe the new development work..."
+              className="h-7 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={!newLabel.trim() || creating}
+              onClick={handleCreateAndReassign}
+              className="h-7 text-xs"
+            >
+              {creating ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Plus className="h-3 w-3 mr-1" />
+              )}
+              Create & Move Entry
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowCreate(false)}
+              className="h-7 text-xs"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

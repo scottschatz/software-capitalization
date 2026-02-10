@@ -17,14 +17,13 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   return NextResponse.json(enhancements)
 }
 
-// POST /api/projects/[id]/enhancements — Create enhancement project (admin/manager only)
+// POST /api/projects/[id]/enhancements — Create enhancement project
+// Any authenticated developer can create an enhancement (they are identifying new feature work
+// on a post-impl project during review, which triggers the ASC 350-40 enhancement workflow)
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const developer = await getDeveloper()
   if (!developer) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (!['admin', 'manager'].includes(developer.role)) {
-    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
   const { id } = await params
