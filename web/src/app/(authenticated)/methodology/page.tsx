@@ -12,20 +12,99 @@ The accounting department uses the confirmed hours data to determine dollar amou
 and general ledger entries. This system provides the defensible, auditable time tracking foundation.`,
   },
   {
-    title: 'Data Collection',
-    content: `Activity data is collected from three sources:
+    title: 'Data Collection Architecture',
+    content: `The system collects developer activity data through two complementary mechanisms: the **Cap Agent**
+(batch sync) and optional **Claude Code Hooks** (real-time events). Each serves a different purpose and
+captures different data. Both feed into the same immutable raw data tables.
 
-1. **Claude Code Sessions** — JSONL transcript files containing timestamped messages, tool invocations,
-   and token usage. Each session is tied to a project directory path.
+All raw data is protected by PostgreSQL database triggers that prevent modification after ingestion.
+See the **Data Immutability** section below for the specific enforcement tiers and which tables are
+covered by each level of protection.`,
+  },
+  {
+    title: 'Source 1: Cap Agent (Primary — Batch Sync)',
+    content: `The cap agent CLI (\`cap sync\`) is the **authoritative data source**. It runs on a schedule
+(typically every 4 hours via cron) or on demand, and performs two scans:
 
-2. **Git Commits** — Commit metadata (hash, timestamp, message, file counts, insertions/deletions)
-   collected via the agent CLI from monitored repositories.
+**Claude Code Session Data** — The agent parses the full JSONL transcript files that Claude Code writes
+to \`~/.claude/projects/\`. These files can be up to 192MB and are stream-parsed. From each session,
+the agent extracts:
+- Session ID, start time, end time, total wall-clock duration
+- Message counts (user messages, assistant responses)
+- Token usage (input/output tokens)
+- Tool invocations with breakdown by tool type (Read, Write, Edit, Bash, etc.)
+- Files referenced during the session
+- First user prompt (for context in AI summarization)
+- Daily time breakdown (when sessions span midnight)
+- Project directory path (used for automatic project matching)
 
-3. **VS Code Hook Events** (optional) — Real-time tool-use events captured by Claude Code hooks,
-   providing granular timestamps for gap-aware active time calculation.
+**Git Commit Data** — The agent scans configured repositories and collects:
+- Commit hash, author, timestamp, message
+- File change counts (insertions, deletions, files changed)
+- Repository path (used for project matching)
 
-All raw data is immutable — INSERT-only tables enforced by database triggers and Prisma middleware.
-This ensures the original evidence cannot be altered after collection.`,
+**Why the agent is the primary source:**
+- It captures the **complete picture** — full session metadata, not just individual events
+- It works **reliably offline** — session files are written locally regardless of network connectivity
+- It provides **backfill capability** — can re-scan historical data if the server was unreachable
+- It handles **deduplication** — the server skips sessions and commits that already exist
+- No dependency on hook configuration — works out of the box after \`cap init\``,
+  },
+  {
+    title: 'Source 2: Claude Code Hooks (Optional — Real-Time Events)',
+    content: `Claude Code hooks are shell scripts that fire in response to Claude Code events. The cap agent
+can install hooks via \`cap hooks install\`, which registers two event handlers in
+\`~/.claude/settings.json\`:
+
+**PostToolUse Hook** — Fires after every tool call in Claude Code. Captures:
+- Session ID
+- Tool name (Read, Write, Edit, Bash, Grep, Glob, etc.)
+- Sanitized tool input: file paths, search patterns, and truncated commands (max 500 chars)
+- Project working directory
+
+Does NOT capture: full tool output, conversation transcript, user messages, or Claude's reasoning.
+
+**Stop Hook** — Fires when a Claude Code session ends. Captures:
+- Session ID
+- Timestamp of session end
+- Project working directory
+
+**Advantages of hooks:**
+- **Real-time granularity** — Tool events arrive with precise timestamps as they happen, enabling
+  more accurate gap-aware active time calculation (vs. the agent's summary-level data)
+- **Earlier session end detection** — The Stop hook captures when a session actually ends, rather
+  than waiting for the next agent sync to discover it from the JSONL file
+- **Configurable** — Hooks are standard Claude Code shell scripts; teams can customize what data
+  is forwarded and how it's sanitized
+
+**Limitations of hooks:**
+- **Event-scoped payloads** — Each hook receives only the data for its specific event (e.g., one
+  tool call). There is no hook event that provides the full conversation transcript or session summary
+- **Network dependent** — Hook scripts use fire-and-forget HTTP calls; events are lost if the server
+  is unreachable (the agent compensates by parsing the complete JSONL files on next sync)
+- **Requires installation** — Hooks must be installed per developer machine via \`cap hooks install\`,
+  adding a setup step
+- **No historical backfill** — Hooks only capture events going forward; they cannot replay past sessions
+
+**Bottom line:** Hooks provide valuable real-time signals but are optional enrichment. The cap agent
+is the reliable foundation that works without hooks. When both are active, the AI entry generation
+uses tool event timestamps for more precise active time calculation.`,
+  },
+  {
+    title: 'Source 3: Git Commits',
+    content: `Git commit data is collected by the cap agent during \`cap sync\`. For each configured repository,
+the agent runs \`git log\` with numstat output and extracts:
+
+- Commit hash, author email, timestamp, commit message
+- Per-file change statistics (insertions, deletions)
+- Total files changed
+
+Commits are matched to projects via repository path configuration. Commits that don't match any
+configured project are flagged as unmatched for manual categorization.
+
+Git data serves as a **corroborating signal** — it confirms that code was actually produced during
+Claude Code sessions, and helps the AI distinguish between active coding days and days with only
+research or planning activity.`,
   },
   {
     title: 'Active Time Calculation',
@@ -137,12 +216,48 @@ Project for separate capitalization tracking.`,
 - **Phase Change Requests** — Phase transitions require admin/manager approval and maintain a
   complete record of request, review, and approval/rejection with reasons.
 
-- **Immutable Raw Data** — Original session transcripts, commit data, and hook events cannot
-  be modified after ingestion.
-
 - **Export Audit Fields** — CSV and Excel exports include: raw hours, adjustment factor,
   estimated hours, confirmed hours, AI model used, confirmation method, confirmer identity,
   confirmation timestamp, and revision count.`,
+  },
+  {
+    title: 'Data Immutability',
+    content: `A core audit requirement is that source evidence cannot be altered after collection. The system
+enforces immutability at two levels: PostgreSQL database triggers and application-layer controls.
+
+**Tier 1 — Fully Immutable (no UPDATE, no DELETE)**
+These tables are strictly write-once. Any attempt to update or delete a row raises a database
+exception, even from a direct SQL connection outside the application:
+
+- \`raw_commits\` — Git commit metadata (hash, author, timestamp, message, file stats)
+- \`raw_tool_events\` — Claude Code hook events (tool name, file paths, timestamps)
+- \`raw_vscode_activity\` — VS Code activity events (if collected)
+- \`daily_entry_revisions\` — Field-level change log for daily entries
+- \`manual_entry_revisions\` — Field-level change log for manual entries
+- \`project_history\` — Project field change audit log
+
+**Tier 2 — Identity-Immutable (metrics updatable, identity fields locked)**
+\`raw_sessions\` uses a more nuanced trigger. Claude Code session files grow as conversations
+continue (context continuations append to the same file), so metric fields (duration, message
+counts, token usage, tool breakdown) must be updatable when re-synced. However, identity
+fields that establish the session's provenance are locked:
+
+- Protected: \`session_id\`, \`developer_id\`, \`project_path\`, \`started_at\`, \`is_backfill\`
+- Updatable: \`ended_at\`, \`duration_seconds\`, \`messages_total\`, \`tokens_*\`, \`tool_*\` counts, etc.
+- DELETE is always blocked
+
+This means the system can enrich a session with updated metrics on subsequent syncs without
+allowing the original session to be replaced or its attribution changed.
+
+**Tier 3 — Delete-Protected (updates allowed through workflow)**
+\`daily_entries\` and \`manual_entries\` can be updated (e.g., when a developer confirms and adjusts
+hours or phase), but cannot be deleted. Every update to these tables creates a corresponding
+revision record in the immutable revision tables, so the full history of changes is preserved.
+
+**Enforcement mechanism:** All immutability rules are enforced by PostgreSQL \`BEFORE UPDATE\` and
+\`BEFORE DELETE\` triggers that raise exceptions. This means the rules apply regardless of how the
+database is accessed — through the application, through Prisma Studio, or via direct SQL.
+The triggers are defined in \`prisma/immutability_triggers.sql\` and applied during migrations.`,
   },
   {
     title: 'Controls Summary',
@@ -154,8 +269,10 @@ Project for separate capitalization tracking.`,
 | Adjustment factor limits | Max 1.5x; >1.25x requires admin/manager authorization |
 | Authorization gate | Capitalization requires documented management authorization |
 | Bulk confirm tracking | Confirmation method recorded for audit pattern analysis |
-| Immutable source data | Raw tables are INSERT-only with database triggers |
-| Complete revision history | Field-level change tracking on all entries |
+| Immutable source data | Raw tables are INSERT-only; PostgreSQL triggers block UPDATE/DELETE even via direct SQL |
+| Identity-locked sessions | Session identity fields (session_id, developer_id, started_at) locked by trigger; metrics updatable |
+| Delete-protected entries | Daily and manual entries cannot be deleted; every update creates an immutable revision record |
+| Complete revision history | Field-level change tracking on all entries with old value, new value, who, when, and auth method |
 | Model transparency | AI model identity and fallback status recorded per entry |`,
   },
   {

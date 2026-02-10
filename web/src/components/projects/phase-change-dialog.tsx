@@ -75,7 +75,35 @@ export function PhaseChangeDialog({ projectId, currentPhase, isAdmin }: PhaseCha
 
       if (!res.ok) {
         const err = await res.json()
-        toast.error(err.error || 'Failed to change phase')
+        const errorMsg = err.error || 'Failed to change phase'
+
+        // Conflict of interest — admin has entries on this project.
+        // Fall back to submitting a request for another admin/manager to approve.
+        if (errorMsg.includes('conflict of interest') || errorMsg.includes('recorded hours')) {
+          const reqRes = await fetch(`/api/projects/${projectId}/phase-change`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestedPhase, reason }),
+          })
+
+          if (!reqRes.ok) {
+            const reqErr = await reqRes.json()
+            toast.error(reqErr.error || 'Failed to submit request')
+            setSubmitting(false)
+            return
+          }
+
+          toast.success('You have hours on this project, so a phase change request was submitted for another admin/manager to approve.')
+          setOpen(false)
+          setRequestedPhase('')
+          setReason('')
+          setGoLiveDate('')
+          setSubmitting(false)
+          router.refresh()
+          return
+        }
+
+        toast.error(errorMsg)
         setSubmitting(false)
         return
       }

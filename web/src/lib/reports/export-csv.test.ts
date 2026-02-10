@@ -23,6 +23,7 @@ function makeDailyEntry(overrides: Partial<DailyEntryRow> = {}): DailyEntryRow {
     revisionCount: 0,
     projectAuthorized: true,
     phaseConfirmed: 'application_development',
+    phaseEffective: null,
     descriptionConfirmed: 'Built feature X',
     status: 'confirmed',
     capitalizable: true,
@@ -41,6 +42,7 @@ function makeManualEntry(overrides: Partial<ManualEntryRow> = {}): ManualEntryRo
     projectName: 'Project B',
     hours: 2,
     phase: 'preliminary',
+    phaseEffective: null,
     description: 'Research task',
     capitalizable: false,
     status: 'confirmed',
@@ -54,7 +56,7 @@ describe('buildCsv', () => {
   it('should produce correct headers', () => {
     const csv = buildCsv([], [])
     const headers = csv.split('\n')[0]
-    expect(headers).toBe('Date,Developer,Project,Hours,Phase,Work Type,Type,Capitalizable,Status,Hours (Raw),Adj. Factor,Hours (Est.),Adjustment Reason,AI Model,Confirmed By,Confirmed At,Confirm Method,Description')
+    expect(headers).toBe('Date,Developer,Project,Hours,Phase (Developer),Phase (Effective),Override,Work Type,Type,Capitalizable,Status,Hours (Raw),Adj. Factor,Hours (Est.),Adjustment Reason,AI Model,Confirmed By,Confirmed At,Confirm Method,Description')
   })
 
   it('should return only headers for empty data', () => {
@@ -71,10 +73,10 @@ describe('buildCsv', () => {
     expect(row[1]).toBe('Alice')
     expect(row[2]).toBe('Project A')
     expect(row[3]).toBe('3.5')  // hoursConfirmed takes precedence
-    expect(row[5]).toBe('')     // workType (null → empty)
-    expect(row[6]).toBe('AI-Generated')
-    expect(row[7]).toBe('Yes')
-    expect(row[8]).toBe('confirmed')
+    expect(row[7]).toBe('')     // workType (null → empty)
+    expect(row[8]).toBe('AI-Generated')
+    expect(row[9]).toBe('Yes')
+    expect(row[10]).toBe('confirmed')
   })
 
   it('should fall back to hoursEstimated when hoursConfirmed is null', () => {
@@ -90,10 +92,10 @@ describe('buildCsv', () => {
     const row = lines[1].split(',')
     expect(row[1]).toBe('Bob')
     expect(row[3]).toBe('2')
-    expect(row[5]).toBe('')     // workType (N/A for manual)
-    expect(row[6]).toBe('Manual')
-    expect(row[7]).toBe('No')
-    expect(row[8]).toBe('confirmed')
+    expect(row[7]).toBe('')     // workType (N/A for manual)
+    expect(row[8]).toBe('Manual')
+    expect(row[9]).toBe('No')
+    expect(row[10]).toBe('confirmed')
   })
 
   it('should sort by date then developer', () => {

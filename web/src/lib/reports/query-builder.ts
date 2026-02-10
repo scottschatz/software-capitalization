@@ -28,6 +28,7 @@ export interface DailyEntryRow {
   confirmationMethod: string | null
   revisionCount: number
   phaseConfirmed: string | null
+  phaseEffective: string | null
   descriptionConfirmed: string | null
   workType: string | null
   status: string
@@ -45,6 +46,7 @@ export interface ManualEntryRow {
   projectName: string
   hours: number
   phase: string
+  phaseEffective: string | null
   description: string
   capitalizable: boolean
   status: string
@@ -80,8 +82,8 @@ export async function queryDailyEntries(filters: ReportFilters): Promise<DailyEn
   })
 
   return entries.map((e) => {
-    const phaseIsCapitalizable = e.phaseConfirmed === 'application_development' ||
-      (!e.phaseConfirmed && e.project?.phase === 'application_development')
+    const effectivePhase = e.phaseEffective ?? e.phaseConfirmed ?? e.phaseAuto ?? e.project?.phase
+    const phaseIsCapitalizable = effectivePhase === 'application_development'
     // ASU 2025-06: project must be authorized and probable to complete
     // Date-aware: authorization only applies from authorizationDate onward
     const authorizedAtDate = e.project?.managementAuthorized === true
@@ -107,6 +109,7 @@ export async function queryDailyEntries(filters: ReportFilters): Promise<DailyEn
       confirmationMethod: e.confirmationMethod,
       revisionCount: e._count.revisions,
       phaseConfirmed: e.phaseConfirmed,
+      phaseEffective: e.phaseEffective,
       descriptionConfirmed: e.descriptionConfirmed,
       workType: e.workType ?? null,
       status: e.status,
@@ -158,8 +161,9 @@ export async function queryManualEntries(filters: ReportFilters): Promise<Manual
       projectName: e.project.name,
       hours: e.hours,
       phase: e.phase,
+      phaseEffective: e.phaseEffective,
       description: e.description,
-      capitalizable: e.phase === 'application_development' && projectAuthorized && projectActive,
+      capitalizable: (e.phaseEffective ?? e.phase) === 'application_development' && projectAuthorized && projectActive,
       status: e.status,
       approvedBy: e.approvedBy?.displayName ?? null,
       approvedAt: e.approvedAt,

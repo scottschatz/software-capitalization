@@ -1,9 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+
+// --- Types ---
 
 interface ModelHealthData {
   config: {
@@ -43,21 +46,113 @@ interface ModelHealthData {
   }>
 }
 
+interface DevDayRow {
+  developerId: string
+  displayName: string
+  sessions: number
+  commits: number
+  entries: number
+  pending: number
+  hasRawData: boolean
+  hasEntries: boolean
+  syncComplete: boolean
+}
+
+interface PipelineStatusData {
+  dailyStatus: Array<{
+    date: string
+    totalSessions: number
+    totalCommits: number
+    totalEntries: number
+    totalPending: number
+    devsWithRawData: number
+    devsWithEntries: number
+    allSyncsComplete: boolean
+    dayIsComplete: boolean
+    canGenerate: boolean
+    developers: DevDayRow[]
+  }>
+  agentStatus: Array<{
+    developerId: string
+    email: string
+    displayName: string
+    agents: Array<{
+      name: string
+      hostname: string | null
+      version: string | null
+      lastReportedAt: string | null
+    }>
+    lastSync: {
+      completedAt: string
+      sessionsCount: number | null
+      commitsCount: number | null
+    } | null
+  }>
+}
+
+// --- Main Component ---
+
 export function SystemHealthClient() {
-  const [data, setData] = useState<ModelHealthData | null>(null)
+  const [modelData, setModelData] = useState<ModelHealthData | null>(null)
+  const [pipelineData, setPipelineData] = useState<PipelineStatusData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [generating, setGenerating] = useState<string | null>(null) // date being generated
+  const [generateResult, setGenerateResult] = useState<{ date: string; message: string } | null>(null)
 
-  useEffect(() => {
-    fetch('/api/admin/model-health')
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const fetchData = useCallback(() => {
+    Promise.all([
+      fetch('/api/admin/model-health').then(r => {
+        if (!r.ok) throw new Error(`Model health: HTTP ${r.status}`)
         return r.json()
+      }),
+      fetch('/api/admin/pipeline-status').then(r => {
+        if (!r.ok) throw new Error(`Pipeline status: HTTP ${r.status}`)
+        return r.json()
+      }),
+    ])
+      .then(([model, pipeline]) => {
+        setModelData(model)
+        setPipelineData(pipeline)
       })
-      .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const handleGenerate = async (date: string) => {
+    setGenerating(date)
+    setGenerateResult(null)
+    try {
+      const res = await fetch('/api/entries/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      }
+      const result = await res.json()
+      setGenerateResult({
+        date,
+        message: `Created ${result.entriesCreated} entries for ${result.developers} developer(s)`,
+      })
+      // Refresh pipeline data to reflect new entries
+      fetch('/api/admin/pipeline-status')
+        .then(r => r.json())
+        .then(setPipelineData)
+        .catch(() => {})
+    } catch (e) {
+      setGenerateResult({
+        date,
+        message: `Error: ${e instanceof Error ? e.message : 'Unknown error'}`,
+      })
+    } finally {
+      setGenerating(null)
+    }
+  }
 
   if (loading) {
     return (
@@ -70,7 +165,7 @@ export function SystemHealthClient() {
     )
   }
 
-  if (error || !data) {
+  if (error || !modelData) {
     return (
       <div className="space-y-6 max-w-5xl">
         <div>
@@ -81,16 +176,248 @@ export function SystemHealthClient() {
     )
   }
 
-  const { config, stats, entryModelStats, recentEvents } = data
+  const { config, stats, entryModelStats, recentEvents } = modelData
 
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold">System Health</h1>
         <p className="text-sm text-muted-foreground">
-          AI model status, fallback events, and retry diagnostics.
+          Pipeline status, agent sync health, and AI model diagnostics.
         </p>
       </div>
+
+      {/* Generate result banner */}
+      {generateResult && (
+        <div className={`rounded-lg border p-3 text-sm ${
+          generateResult.message.startsWith('Error')
+            ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200'
+            : 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200'
+        }`}>
+          <strong>{generateResult.date}:</strong> {generateResult.message}
+        </div>
+      )}
+
+      {/* Section 1: Agent Sync Status */}
+      {pipelineData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Agent Sync Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Developer</TableHead>
+                  <TableHead>Agent</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Last Sync</TableHead>
+                  <TableHead className="text-right">Sessions</TableHead>
+                  <TableHead className="text-right">Commits</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pipelineData.agentStatus.map((dev) => {
+                  const syncAge = dev.lastSync
+                    ? (Date.now() - new Date(dev.lastSync.completedAt).getTime()) / (1000 * 60 * 60)
+                    : null
+                  const agentName = dev.agents[0]?.name ?? 'No agent'
+                  const hostname = dev.agents[0]?.hostname
+                  const version = dev.agents[0]?.version
+
+                  return (
+                    <TableRow key={dev.developerId}>
+                      <TableCell className="font-medium">{dev.displayName}</TableCell>
+                      <TableCell className="text-sm">
+                        {agentName}
+                        {hostname && <span className="text-muted-foreground ml-1">({hostname})</span>}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{version ?? '-'}</TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {dev.lastSync
+                          ? formatTimeAgo(dev.lastSync.completedAt)
+                          : <span className="text-muted-foreground">Never</span>
+                        }
+                      </TableCell>
+                      <TableCell className="text-right">{dev.lastSync?.sessionsCount ?? '-'}</TableCell>
+                      <TableCell className="text-right">{dev.lastSync?.commitsCount ?? '-'}</TableCell>
+                      <TableCell>
+                        <SyncStatusDot hours={syncAge} />
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {pipelineData.agentStatus.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      No active developers
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Section 2: Daily Generation Pipeline */}
+      {pipelineData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Daily Generation Pipeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date / Developer</TableHead>
+                  <TableHead className="text-right">Sessions</TableHead>
+                  <TableHead className="text-right">Commits</TableHead>
+                  <TableHead>Synced</TableHead>
+                  <TableHead>Generated</TableHead>
+                  <TableHead className="text-right">Pending</TableHead>
+                  <TableHead>Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pipelineData.dailyStatus.map((day) => {
+                  const hasActivity = day.totalSessions > 0 || day.totalCommits > 0 || day.totalEntries > 0
+                  if (!hasActivity) {
+                    return (
+                      <TableRow key={day.date} className="bg-muted/10">
+                        <TableCell className="font-mono text-sm font-semibold">{day.date}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                        <TableCell><span className="text-muted-foreground text-xs">No data</span></TableCell>
+                        <TableCell><span className="text-muted-foreground text-xs">-</span></TableCell>
+                        <TableCell className="text-right text-muted-foreground">-</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    )
+                  }
+
+                  const showDevRows = day.developers.length > 1
+
+                  return (
+                    <React.Fragment key={day.date}>
+                      {/* Date summary row */}
+                      <TableRow className={day.canGenerate ? 'bg-amber-50/50 dark:bg-amber-950/20' : 'bg-muted/10'}>
+                        <TableCell className="font-mono text-sm font-semibold">
+                          {day.date}
+                          {showDevRows ? (
+                            <span className="text-xs text-muted-foreground font-normal ml-2">
+                              ({day.developers.length} developers)
+                            </span>
+                          ) : day.developers.length === 1 && (
+                            <span className="text-xs text-muted-foreground font-normal ml-2">
+                              {day.developers[0].displayName}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">{day.totalSessions || '-'}</TableCell>
+                        <TableCell className="text-right font-medium">{day.totalCommits || '-'}</TableCell>
+                        <TableCell>
+                          {day.allSyncsComplete ? (
+                            <Badge className="bg-green-100 text-green-800 border-green-200">Complete</Badge>
+                          ) : !day.dayIsComplete ? (
+                            <Badge className="bg-blue-100 text-blue-800 border-blue-200">In progress</Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-800 border-amber-200">Waiting</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {day.devsWithRawData === 0 ? (
+                            <span className="text-muted-foreground text-xs">-</span>
+                          ) : day.devsWithEntries >= day.devsWithRawData ? (
+                            <Badge className="bg-green-100 text-green-800 border-green-200">
+                              Yes{day.devsWithRawData > 1 ? ` (${day.devsWithEntries}/${day.devsWithRawData})` : ''}
+                            </Badge>
+                          ) : day.devsWithEntries > 0 ? (
+                            <Badge className="bg-amber-100 text-amber-800 border-amber-200">
+                              Partial ({day.devsWithEntries}/{day.devsWithRawData})
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-800 border-amber-200">No</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {day.totalPending > 0 ? (
+                            <span className="text-amber-700 dark:text-amber-400 font-medium">{day.totalPending}</span>
+                          ) : day.totalEntries > 0 ? (
+                            <span className="text-green-700 dark:text-green-400">0</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {day.canGenerate ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={generating !== null}
+                              onClick={() => handleGenerate(day.date)}
+                            >
+                              {generating === day.date ? 'Generating...' : 'Generate'}
+                            </Button>
+                          ) : !day.dayIsComplete ? (
+                            <span className="text-xs text-muted-foreground">Day not ended</span>
+                          ) : !day.allSyncsComplete && day.devsWithRawData > day.devsWithEntries ? (
+                            <span className="text-xs text-muted-foreground">Awaiting sync</span>
+                          ) : null}
+                        </TableCell>
+                      </TableRow>
+
+                      {/* Per-developer rows (when multiple developers) */}
+                      {showDevRows && day.developers.map((dev) => (
+                        <TableRow key={`${day.date}-${dev.developerId}`} className="text-xs">
+                          <TableCell className="pl-8 text-muted-foreground">{dev.displayName}</TableCell>
+                          <TableCell className="text-right">{dev.sessions || '-'}</TableCell>
+                          <TableCell className="text-right">{dev.commits || '-'}</TableCell>
+                          <TableCell>
+                            {dev.syncComplete ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                                <span className="text-green-700 dark:text-green-400">Yes</span>
+                              </span>
+                            ) : dev.hasRawData ? (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                <span className="text-amber-700 dark:text-amber-400">No</span>
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {dev.hasEntries ? (
+                              <span className="text-green-700 dark:text-green-400">{dev.entries} entries</span>
+                            ) : dev.hasRawData ? (
+                              <span className="text-muted-foreground">-</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {dev.pending > 0 ? (
+                              <span className="text-amber-700 dark:text-amber-400">{dev.pending}</span>
+                            ) : dev.entries > 0 ? (
+                              <span className="text-green-700 dark:text-green-400">0</span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                      ))}
+                    </React.Fragment>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Alert if consecutive fallbacks */}
       {stats.consecutiveFallbacks >= 3 && (
@@ -286,6 +613,41 @@ export function SystemHealthClient() {
   )
 }
 
+// --- Helper Components ---
+
+function SyncStatusDot({ hours }: { hours: number | null }) {
+  if (hours === null) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-gray-400" />
+        <span className="text-xs text-muted-foreground">Never</span>
+      </span>
+    )
+  }
+  if (hours < 24) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-green-500" />
+        <span className="text-xs text-green-700 dark:text-green-400">OK</span>
+      </span>
+    )
+  }
+  if (hours < 168) { // 7 days
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-amber-500" />
+        <span className="text-xs text-amber-700 dark:text-amber-400">Stale</span>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="h-2 w-2 rounded-full bg-red-500" />
+      <span className="text-xs text-red-700 dark:text-red-400">Down</span>
+    </span>
+  )
+}
+
 function EventTypeBadge({ type }: { type: string }) {
   switch (type) {
     case 'success':
@@ -321,4 +683,15 @@ function StatBox({ label, value, sub, color = 'default' }: {
       {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
     </div>
   )
+}
+
+function formatTimeAgo(isoString: string): string {
+  const ms = Date.now() - new Date(isoString).getTime()
+  const mins = Math.floor(ms / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }

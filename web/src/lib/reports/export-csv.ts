@@ -13,7 +13,9 @@ export function buildCsv(
     'Developer',
     'Project',
     'Hours',
-    'Phase',
+    'Phase (Developer)',
+    'Phase (Effective)',
+    'Override',
     'Work Type',
     'Type',
     'Capitalizable',
@@ -32,12 +34,16 @@ export function buildCsv(
   const rows: string[][] = []
 
   for (const e of dailyEntries) {
+    const devPhase = e.phaseConfirmed ?? e.projectPhase ?? ''
+    const effPhase = e.phaseEffective ?? devPhase
     rows.push([
       format(new Date(e.date), 'yyyy-MM-dd'),
       e.developerName,
       e.projectName ?? '',
       String(e.hoursConfirmed ?? e.hoursEstimated ?? 0),
-      e.phaseConfirmed ?? e.projectPhase ?? '',
+      devPhase,
+      effPhase,
+      e.phaseEffective && e.phaseEffective !== devPhase ? 'Yes' : '',
       e.workType ?? '',
       'AI-Generated',
       e.capitalizable ? 'Yes' : 'No',
@@ -64,6 +70,8 @@ export function buildCsv(
       e.projectName,
       String(e.hours),
       e.phase,
+      e.phaseEffective ?? e.phase,
+      e.phaseEffective && e.phaseEffective !== e.phase ? 'Yes' : '',
       '', // Work Type (N/A for manual entries)
       'Manual',
       e.capitalizable ? 'Yes' : 'No',

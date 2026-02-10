@@ -33,6 +33,7 @@ interface PendingEntry {
   projectName: string
   hours: number
   phase: string
+  phaseEffective: string | null
   description: string
   status: string
 }
@@ -265,9 +266,16 @@ export function ApprovalsClient({ entries, currentDeveloperId }: ApprovalsClient
                             </td>
                             <td className="px-4 py-3 text-right font-medium">{entry.hours.toFixed(1)}h</td>
                             <td className="px-4 py-3">
-                              <Badge variant="outline" className="text-xs">
-                                {PHASE_LABELS[entry.phase] ?? entry.phase}
-                              </Badge>
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {PHASE_LABELS[entry.phase] ?? entry.phase}
+                                </Badge>
+                                {entry.phaseEffective && entry.phaseEffective !== entry.phase && (
+                                  <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-[10px]">
+                                    Eff: {PHASE_LABELS[entry.phaseEffective] ?? entry.phaseEffective}
+                                  </Badge>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-3 max-w-xs truncate" title={entry.description}>
                               {entry.description.split('\n')[0].slice(0, 100)}
@@ -417,9 +425,16 @@ export function ApprovalsClient({ entries, currentDeveloperId }: ApprovalsClient
                             </td>
                             <td className="px-4 py-3 text-right font-medium">{entry.hours.toFixed(1)}h</td>
                             <td className="px-4 py-3">
-                              <Badge variant="outline" className="text-xs">
-                                {PHASE_LABELS[entry.phase] ?? entry.phase}
-                              </Badge>
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {PHASE_LABELS[entry.phase] ?? entry.phase}
+                                </Badge>
+                                {entry.phaseEffective && entry.phaseEffective !== entry.phase && (
+                                  <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-[10px]">
+                                    Eff: {PHASE_LABELS[entry.phaseEffective] ?? entry.phaseEffective}
+                                  </Badge>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-3 max-w-xs truncate" title={entry.description}>
                               {entry.description.split('\n')[0].slice(0, 100)}

@@ -25,10 +25,16 @@ export async function authenticateAgent(request: NextRequest) {
   // Check developer is active
   if (!agentKey.developer.active) return null
 
-  // Update last used timestamp
+  // Extract agent version from header
+  const agentVersion = request.headers.get('X-Agent-Version') ?? undefined
+
+  // Update last used timestamp and version
   await prisma.agentKey.update({
     where: { id: agentKey.id },
-    data: { lastUsedAt: new Date() },
+    data: {
+      lastUsedAt: new Date(),
+      ...(agentVersion ? { lastKnownVersion: agentVersion } : {}),
+    },
   })
 
   return { agentKey, developer: agentKey.developer }

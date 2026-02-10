@@ -1,4 +1,4 @@
-import { loadConfig } from '../config.js'
+import { loadConfig, getClaudeDataDirs } from '../config.js'
 import { discoverProjects } from '../parsers/env-scanner.js'
 import { postDiscover } from '../api-client.js'
 
@@ -15,7 +15,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<void> {
 
   // 1. Scan local environment
   console.log('  Scanning environment for projects...')
-  const discovered = discoverProjects(config.claudeDataDir)
+  const discovered = discoverProjects(getClaudeDataDirs(config), config.excludePaths)
   console.log(`  Found ${discovered.length} projects`)
 
   if (discovered.length === 0) {

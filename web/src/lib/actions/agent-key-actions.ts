@@ -42,8 +42,52 @@ export async function listAgentKeys(developerId: string) {
       name: true,
       machineName: true,
       lastUsedAt: true,
+      lastKnownVersion: true,
+      claudeDataDirs: true,
+      excludePaths: true,
+      hostname: true,
+      osInfo: true,
+      hooksInstalled: true,
+      lastReportedAt: true,
+      syncScheduleWeekday: true,
+      syncScheduleWeekend: true,
       createdAt: true,
     },
     orderBy: { createdAt: 'desc' },
+  })
+}
+
+export async function updateAgentKey(
+  keyId: string,
+  developerId: string,
+  data: {
+    name?: string
+    machineName?: string
+    claudeDataDirs?: string[]
+    excludePaths?: string[]
+    syncScheduleWeekday?: string | null
+    syncScheduleWeekend?: string | null
+  }
+) {
+  const key = await prisma.agentKey.findUniqueOrThrow({
+    where: { id: keyId },
+  })
+
+  if (key.developerId !== developerId) {
+    throw new Error('Key does not belong to this developer')
+  }
+
+  return prisma.agentKey.update({
+    where: { id: keyId },
+    data,
+    select: {
+      id: true,
+      name: true,
+      machineName: true,
+      claudeDataDirs: true,
+      excludePaths: true,
+      syncScheduleWeekday: true,
+      syncScheduleWeekend: true,
+    },
   })
 }

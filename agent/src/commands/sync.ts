@@ -1,11 +1,25 @@
-import { loadConfig, saveConfig } from '../config.js'
+import { loadConfig, saveConfig, getClaudeDataDirs } from '../config.js'
 import { scanClaudeProjects } from '../parsers/claude-scanner.js'
 import { parseClaudeJsonl } from '../parsers/claude-jsonl.js'
 import { parseGitLog } from '../parsers/git-log.js'
 import { discoverProjects } from '../parsers/env-scanner.js'
-import { fetchProjects, postSync, postDiscover, fetchAgentConfig } from '../api-client.js'
+import { fetchProjects, postSync, postDiscover, fetchAgentConfig, fetchLastSync, reportAgentState, AGENT_VERSION } from '../api-client.js'
 import type { SyncPayload, SyncSession, SyncCommit } from '../api-client.js'
+import { hostname, platform, release } from 'node:os'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { updateTimers } from '../timer-updater.js'
+
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1
+  }
+  return 0
+}
 
 interface SyncOptions {
   from?: string
@@ -32,7 +46,7 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   // 0. Auto-discover projects
   if (!options.skipDiscover) {
     console.log('  Discovering projects...')
-    const discovered = discoverProjects(config.claudeDataDir)
+    const discovered = discoverProjects(getClaudeDataDirs(config), config.excludePaths)
     if (discovered.length > 0 && !options.dryRun) {
       try {
         const discResult = await postDiscover(config, { projects: discovered })
@@ -72,12 +86,24 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     sinceDate = new Date(options.from)
   } else if (config.lastSync) {
     sinceDate = new Date(config.lastSync)
+  } else {
+    // No local lastSync — check server for last successful sync
+    try {
+      const serverSync = await fetchLastSync(config)
+      if (serverSync.lastSync) {
+        sinceDate = new Date(serverSync.lastSync.completedAt)
+        console.log(`  Resuming from server last sync: ${sinceDate.toISOString()}`)
+        config.lastSync = sinceDate.toISOString()
+        saveConfig(config)
+      }
+    } catch {
+      // Non-fatal — will do full scan if server unreachable
+    }
   }
-  // If no lastSync and no --from, scan everything
 
   // 3. Scan Claude JSONL files
   console.log('  Scanning Claude Code sessions...')
-  const jsonlFiles = scanClaudeProjects(config.claudeDataDir, sinceDate)
+  const jsonlFiles = scanClaudeProjects(getClaudeDataDirs(config), sinceDate, config.excludePaths)
   console.log(`  Found ${jsonlFiles.length} JSONL files to process`)
 
   // Build a set of known project claude paths for quick lookup
@@ -149,6 +175,9 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     console.log('  Scanning git repositories...')
     for (const proj of projects) {
       for (const repo of proj.repos) {
+        // Skip repo paths that don't exist on this machine (registered by another developer)
+        if (!existsSync(repo.repoPath)) continue
+
         const gitCommits = parseGitLog(repo.repoPath, {
           since: options.from ?? sinceDate?.toISOString(),
           until: options.to,
@@ -219,18 +248,54 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     config.lastSync = new Date().toISOString()
     saveConfig(config)
 
-    // Pull remote config and update timers if schedule changed
+    // Report machine state to server
+    const hooksDir = join(homedir(), '.cap-agent', 'hooks')
+    const hooksInstalled = existsSync(join(hooksDir, 'post-tool-use.sh')) && existsSync(join(hooksDir, 'stop.sh'))
+    const allDiscovered = discoverProjects(getClaudeDataDirs(config), undefined) // full list without excludes
+    await reportAgentState(config, {
+      hostname: hostname(),
+      osInfo: `${platform()} ${release()}`,
+      discoveredPaths: allDiscovered.map(p => ({
+        localPath: p.localPath,
+        claudePath: p.claudePath,
+        hasGit: p.hasGit,
+        excluded: config.excludePaths?.some(ex => p.localPath.includes(ex) || (p.claudePath?.includes(ex) ?? false)) ?? false,
+      })),
+      hooksInstalled,
+    })
+
+    // Pull remote config and apply settings
     const remoteConfig = await fetchAgentConfig(config)
-    if (remoteConfig && remoteConfig.configVersion !== config.lastConfigVersion) {
-      const timerUpdates = updateTimers(remoteConfig)
-      if (timerUpdates.length > 0) {
-        console.log('\n  Schedule updated from server:')
-        for (const u of timerUpdates) {
-          console.log(`    ${u.file}: ${u.detail}`)
+    if (remoteConfig) {
+      // Apply schedule updates if config version changed
+      if (remoteConfig.configVersion !== config.lastConfigVersion) {
+        const timerUpdates = updateTimers(remoteConfig)
+        if (timerUpdates.length > 0) {
+          console.log('\n  Schedule updated from server:')
+          for (const u of timerUpdates) {
+            console.log(`    ${u.file}: ${u.detail}`)
+          }
         }
+        config.lastConfigVersion = remoteConfig.configVersion
       }
-      config.lastConfigVersion = remoteConfig.configVersion
+
+      // Apply server-managed agent settings
+      if (remoteConfig.claudeDataDirs?.length) {
+        config.claudeDataDirs = remoteConfig.claudeDataDirs
+      }
+      if (remoteConfig.excludePaths) {
+        config.excludePaths = remoteConfig.excludePaths
+      }
+
       saveConfig(config)
+
+      // Version warnings
+      if (remoteConfig.minSupportedVersion && compareVersions(AGENT_VERSION, remoteConfig.minSupportedVersion) < 0) {
+        console.log(`\n  WARNING: Agent version ${AGENT_VERSION} is no longer supported (minimum: ${remoteConfig.minSupportedVersion}).`)
+        console.log(`  Run 'cap update' to upgrade.`)
+      } else if (remoteConfig.latestVersion && compareVersions(AGENT_VERSION, remoteConfig.latestVersion) < 0) {
+        console.log(`\n  Update available: ${AGENT_VERSION} -> ${remoteConfig.latestVersion}. Run 'cap update' to upgrade.`)
+      }
     }
   } catch (err) {
     console.error(`  Sync failed: ${err instanceof Error ? err.message : err}`)

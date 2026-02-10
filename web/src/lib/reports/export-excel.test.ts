@@ -24,6 +24,7 @@ function makeDailyEntry(overrides: Partial<DailyEntryRow> = {}): DailyEntryRow {
     revisionCount: 0,
     projectAuthorized: true,
     phaseConfirmed: 'application_development',
+    phaseEffective: null,
     descriptionConfirmed: 'Built feature X',
     status: 'confirmed',
     capitalizable: true,
@@ -42,6 +43,7 @@ function makeManualEntry(overrides: Partial<ManualEntryRow> = {}): ManualEntryRo
     projectName: 'Project B',
     hours: 2,
     phase: 'preliminary',
+    phaseEffective: null,
     description: 'Research task',
     capitalizable: false,
     status: 'confirmed',
@@ -130,11 +132,11 @@ describe('buildExcelReport', () => {
     // Row 1 = legend, Row 2 = headers, data starts at row 3
     const row3 = sheet.getRow(3)
     expect(row3.getCell(2).value).toBe('Alice')
-    expect(row3.getCell(7).value).toBe('AI-Generated')
+    expect(row3.getCell(9).value).toBe('AI-Generated')
 
     const row4 = sheet.getRow(4)
     expect(row4.getCell(2).value).toBe('Bob')
-    expect(row4.getCell(7).value).toBe('Manual')
+    expect(row4.getCell(9).value).toBe('Manual')
   })
 
   it('should populate Capitalization sheet with percentages', async () => {

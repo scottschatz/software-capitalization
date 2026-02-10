@@ -423,12 +423,10 @@ export async function approvePhaseChange(
       },
     })
 
-    // Reclassify pending entries when transitioning to post_implementation
-    if (request.requestedPhase === 'post_implementation') {
-      const project = await tx.project.findUniqueOrThrow({ where: { id: projectId } })
-      const effectiveDate = project.phaseEffectiveDate ?? new Date()
-      await reclassifyEntriesForPostImpl(tx, projectId, effectiveDate)
-    }
+    // Cascade phase to all entries (including confirmed) after effective date
+    const project = await tx.project.findUniqueOrThrow({ where: { id: projectId } })
+    const effectiveDate = project.phaseEffectiveDate ?? new Date()
+    await cascadePhaseToEntries(tx, projectId, request.requestedPhase, effectiveDate, reviewerId)
 
     return updated
   })
@@ -578,10 +576,8 @@ export async function directPhaseChange(
       })
     }
 
-    // Reclassify pending entries when transitioning to post_implementation
-    if (input.newPhase === 'post_implementation') {
-      await reclassifyEntriesForPostImpl(tx, projectId, effectiveDate)
-    }
+    // Cascade phase to all entries (including confirmed) after effective date
+    await cascadePhaseToEntries(tx, projectId, input.newPhase, effectiveDate, adminId)
 
     return updated
   })
@@ -678,43 +674,118 @@ export async function listEnhancementProjects(parentId: string) {
 // ENTRY RECLASSIFICATION ON POST-IMPLEMENTATION TRANSITION
 // ============================================================
 
-async function reclassifyEntriesForPostImpl(
+/**
+ * Cascade a phase change to all entries (daily + manual) after the effective date.
+ * - Sets `phaseEffective` on ALL entries (including confirmed) — manager authority
+ * - Flags pending/flagged entries for re-review when phase differs from phaseAuto
+ * - Creates revision records for confirmed entries
+ */
+async function cascadePhaseToEntries(
   tx: Prisma.TransactionClient,
   projectId: string,
-  effectiveDate: Date
+  newPhase: string,
+  effectiveDate: Date,
+  changedById: string
 ) {
-  // Find unconfirmed entries after effective date that were classified as app_dev
-  const entriesToReclassify = await tx.dailyEntry.findMany({
+  // --- Daily Entries ---
+
+  // 1. Set phaseEffective on ALL daily entries after the effective date
+  await tx.dailyEntry.updateMany({
+    where: { projectId, date: { gte: effectiveDate } },
+    data: { phaseEffective: newPhase },
+  })
+
+  // 2. Flag pending/flagged entries that had a different phaseAuto for re-review
+  const pendingToFlag = await tx.dailyEntry.findMany({
     where: {
       projectId,
       date: { gte: effectiveDate },
       status: { in: ['pending', 'flagged'] },
-      phaseAuto: 'application_development',
+      phaseAuto: { not: newPhase },
     },
     select: { id: true, descriptionAuto: true },
   })
 
-  if (entriesToReclassify.length === 0) return
+  if (pendingToFlag.length > 0) {
+    await tx.dailyEntry.updateMany({
+      where: { id: { in: pendingToFlag.map((e) => e.id) } },
+      data: { phaseAuto: newPhase, status: 'flagged' },
+    })
 
-  // Bulk update: change phase to post_implementation and flag for review
-  await tx.dailyEntry.updateMany({
-    where: { id: { in: entriesToReclassify.map((e) => e.id) } },
-    data: {
-      phaseAuto: 'post_implementation',
-      status: 'flagged',
+    // Append note for post-impl transitions
+    if (newPhase === 'post_implementation') {
+      const note = '\n⚠️ Enhancement Suggested: Project moved to post-implementation. This entry contained development work — consider moving to an Enhancement Project or confirm as maintenance.'
+      for (const entry of pendingToFlag) {
+        if (!entry.descriptionAuto?.includes('Enhancement Suggested')) {
+          await tx.dailyEntry.update({
+            where: { id: entry.id },
+            data: { descriptionAuto: (entry.descriptionAuto ?? '') + note },
+          })
+        }
+      }
+    }
+  }
+
+  // 3. Create revision records for confirmed/approved entries
+  const confirmedEntries = await tx.dailyEntry.findMany({
+    where: {
+      projectId,
+      date: { gte: effectiveDate },
+      status: { in: ['confirmed', 'approved'] },
     },
+    select: { id: true, developerId: true, phaseConfirmed: true },
   })
 
-  // Append enhancement suggestion note to each entry
-  const enhancementNote =
-    '\n⚠️ Enhancement Suggested: Project moved to post-implementation. This entry contained development work — consider moving to an Enhancement Project or confirm as maintenance.'
+  for (const entry of confirmedEntries) {
+    const lastRev = await tx.dailyEntryRevision.findFirst({
+      where: { entryId: entry.id },
+      orderBy: { revision: 'desc' },
+      select: { revision: true },
+    })
+    await tx.dailyEntryRevision.create({
+      data: {
+        entryId: entry.id,
+        changedById,
+        revision: (lastRev?.revision ?? 0) + 1,
+        field: 'phaseEffective',
+        oldValue: entry.phaseConfirmed,
+        newValue: newPhase,
+        reason: `Phase change cascade: project moved to ${newPhase}`,
+        authMethod: 'system',
+      },
+    })
+  }
 
-  for (const entry of entriesToReclassify) {
-    if (!entry.descriptionAuto?.includes('Enhancement Suggested')) {
-      await tx.dailyEntry.update({
-        where: { id: entry.id },
-        data: { descriptionAuto: (entry.descriptionAuto ?? '') + enhancementNote },
-      })
-    }
+  // --- Manual Entries ---
+
+  await tx.manualEntry.updateMany({
+    where: { projectId, date: { gte: effectiveDate } },
+    data: { phaseEffective: newPhase },
+  })
+
+  // Create revision records for manual entries
+  const manualEntries = await tx.manualEntry.findMany({
+    where: { projectId, date: { gte: effectiveDate } },
+    select: { id: true, developerId: true, phase: true },
+  })
+
+  for (const entry of manualEntries) {
+    const lastRev = await tx.manualEntryRevision.findFirst({
+      where: { entryId: entry.id },
+      orderBy: { revision: 'desc' },
+      select: { revision: true },
+    })
+    await tx.manualEntryRevision.create({
+      data: {
+        entryId: entry.id,
+        changedById,
+        revision: (lastRev?.revision ?? 0) + 1,
+        field: 'phaseEffective',
+        oldValue: entry.phase,
+        newValue: newPhase,
+        reason: `Phase change cascade: project moved to ${newPhase}`,
+        authMethod: 'system',
+      },
+    })
   }
 }

@@ -305,7 +305,48 @@ export async function generateEntriesForDate(targetDate?: Date): Promise<{
       : undefined
 
     try {
-      const { entries: aiEntries, modelUsed, fallback: modelFallback } = await generateDailyEntries(ctx, historicalStats)
+      const { entries: rawAiEntries, modelUsed, fallback: modelFallback } = await generateDailyEntries(ctx, historicalStats)
+
+      // --- Server-side project ID resolution ---
+      // The AI may return null, a hallucinated UUID, or an incorrect ID.
+      // Resolve by: (1) exact ID match, (2) name match, (3) session path match.
+      const aiEntries = rawAiEntries.map((entry) => {
+        // Already valid
+        if (entry.projectId && projects.find((p) => p.id === entry.projectId)) {
+          return entry
+        }
+
+        // Try matching by project name (case-insensitive)
+        const byName = projects.find((p) =>
+          p.name.toLowerCase() === entry.projectName.toLowerCase()
+        )
+        if (byName) {
+          return { ...entry, projectId: byName.id }
+        }
+
+        // Try matching session paths to project claude paths
+        for (const p of projects) {
+          const claudePathSet = p.claudePaths.map((c) => c.claudePath)
+          const hasMatchingSession = mappedSessions.some((s) =>
+            claudePathSet.includes(s.projectPath)
+          )
+          const hasMatchingCommit = commits.some((c) =>
+            p.repos.some((r) => r.repoPath === c.repoPath)
+          )
+
+          if (!hasMatchingSession && !hasMatchingCommit) continue
+
+          // Check if entry's projectName loosely matches this project
+          const nameWords = entry.projectName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+          const projWords = p.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+          const overlap = nameWords.filter((w) => projWords.includes(w)).length
+          if (overlap > 0 && overlap >= Math.min(nameWords.length, projWords.length) * 0.5) {
+            return { ...entry, projectId: p.id }
+          }
+        }
+
+        return entry
+      })
 
       // --- Feature H: Classify work types (parallel, async) ---
       // Build classification inputs from session/commit data matched to each AI entry

@@ -90,6 +90,7 @@ export interface SerializedEntry {
   hoursRaw: number | null
   adjustmentFactor: number | null
   phaseAuto: string | null
+  phaseEffective: string | null
   descriptionAuto: string | null
   hoursConfirmed: number | null
   phaseConfirmed: string | null
@@ -194,7 +195,7 @@ export function ReviewPageClient({
           0
         ) + manual.reduce((sum, m) => sum + m.hours, 0)
         const capHours = dayEntries
-          .filter((e) => (e.phaseConfirmed ?? e.phaseAuto) === 'application_development')
+          .filter((e) => (e.phaseEffective ?? e.phaseConfirmed ?? e.phaseAuto) === 'application_development')
           .reduce((sum, e) => sum + (e.hoursConfirmed ?? e.hoursEstimated ?? 0), 0)
           + manual
             .filter((m) => m.phase === 'application_development')
@@ -212,13 +213,9 @@ export function ReviewPageClient({
         }
       })
 
-    // Auto-expand days with pending entries on initial load (limit to 3 most recent to reduce lag)
+    // Start collapsed on initial load — user can expand as needed
     if (initialLoad && days.length > 0) {
-      const pendingDayStrs = days.filter((d) => d.pendingCount > 0).map((d) => d.dateStr)
-      const autoExpand = new Set(pendingDayStrs.slice(0, 3))
-      // If no pending days but showing all, expand the first day
-      if (autoExpand.size === 0 && days.length > 0) autoExpand.add(days[0].dateStr)
-      setExpandedDays(autoExpand)
+      setExpandedDays(new Set())
       setInitialLoad(false)
     }
 

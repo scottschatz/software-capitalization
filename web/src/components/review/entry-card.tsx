@@ -144,7 +144,9 @@ export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: E
     }
   }
 
-  const capitalizable = phase === 'application_development'
+  const effectivePhaseForCap = entry.phaseEffective ?? phase
+  const capitalizable = effectivePhaseForCap === 'application_development'
+  const hasManagerOverride = entry.phaseEffective != null && entry.phaseEffective !== phase
 
   // Date-aware authorization check for hint display
   const proj = projects.find((p) => p.id === projectId)
@@ -271,6 +273,11 @@ export function EntryCard({ entry, projects, enhancements = [], onConfirmed }: E
             {isFlagged && (
               <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs">
                 <AlertTriangle className="h-3 w-3 mr-1" /> Flagged
+              </Badge>
+            )}
+            {hasManagerOverride && (
+              <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-xs">
+                Manager Override: {PHASE_LABELS[entry.phaseEffective!] ?? entry.phaseEffective}
               </Badge>
             )}
             {entry.workType && (

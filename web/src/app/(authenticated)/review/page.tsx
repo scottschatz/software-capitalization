@@ -174,6 +174,7 @@ export default async function ReviewPage({
     date: e.date.toISOString(),
     hoursEstimated: e.hoursEstimated,
     phaseAuto: e.phaseAuto,
+    phaseEffective: e.phaseEffective,
     descriptionAuto: e.descriptionAuto,
     hoursConfirmed: e.hoursConfirmed,
     phaseConfirmed: e.phaseConfirmed,

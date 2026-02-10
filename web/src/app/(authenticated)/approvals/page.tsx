@@ -46,6 +46,7 @@ export default async function ApprovalsPage() {
     projectName: e.project?.name ?? 'Unassigned',
     hours: e.hoursConfirmed ?? e.hoursEstimated ?? 0,
     phase: e.phaseConfirmed ?? e.project?.phase ?? 'unknown',
+    phaseEffective: e.phaseEffective ?? null,
     description: e.descriptionConfirmed ?? e.descriptionAuto ?? '',
     status: e.status,
   }))
@@ -60,6 +61,7 @@ export default async function ApprovalsPage() {
     projectName: e.project?.name ?? 'Unassigned',
     hours: e.hours,
     phase: e.phase,
+    phaseEffective: e.phaseEffective ?? null,
     description: e.description,
     status: e.status,
   }))

@@ -10,7 +10,8 @@ export interface JsonlFile {
 }
 
 /**
- * Scan ~/.claude/projects/ for JSONL files, optionally filtering by modification time.
+ * Scan Claude projects directories for JSONL files, optionally filtering by modification time.
+ * Supports multiple base directories and path exclusion patterns.
  *
  * File structure:
  *   ~/.claude/projects/<encoded-path>/<uuid>.jsonl        (interactive sessions)
@@ -18,23 +19,28 @@ export interface JsonlFile {
  *   ~/.claude/projects/<encoded-path>/<uuid>/subagents/agent-*.jsonl  (subagent files)
  */
 export function scanClaudeProjects(
-  claudeDataDir?: string,
-  sinceDate?: Date
+  claudeDataDirs: string | string[],
+  sinceDate?: Date,
+  excludePaths?: string[]
 ): JsonlFile[] {
-  const baseDir = resolveClaudeDir(claudeDataDir)
-  if (!existsSync(baseDir)) {
-    return []
-  }
-
+  const dirs = Array.isArray(claudeDataDirs) ? claudeDataDirs : [claudeDataDirs]
+  const seen = new Set<string>()
   const files: JsonlFile[] = []
 
-  // Each subdirectory in projects/ is an encoded project path
-  const projectDirs = readdirSync(baseDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
+  for (const dir of dirs) {
+    const baseDir = resolveClaudeDir(dir)
+    if (!existsSync(baseDir)) continue
 
-  for (const projDir of projectDirs) {
-    const projPath = join(baseDir, projDir.name)
-    collectJsonlFiles(projPath, projDir.name, files, sinceDate)
+    const projectDirs = readdirSync(baseDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+
+    for (const projDir of projectDirs) {
+      // Check exclusions against the encoded project dir name
+      if (excludePaths?.some((pattern) => projDir.name.includes(pattern))) continue
+
+      const projPath = join(baseDir, projDir.name)
+      collectJsonlFiles(projPath, projDir.name, files, sinceDate, seen)
+    }
   }
 
   return files
@@ -44,7 +50,8 @@ function collectJsonlFiles(
   dirPath: string,
   projectDir: string,
   files: JsonlFile[],
-  sinceDate?: Date
+  sinceDate?: Date,
+  seen?: Set<string>
 ): void {
   let entries
   try {
@@ -66,6 +73,10 @@ function collectJsonlFiles(
         // Skip files not modified since last sync
         if (sinceDate && stat.mtime < sinceDate) continue
 
+        // Deduplicate across multiple base dirs
+        if (seen?.has(fullPath)) continue
+        seen?.add(fullPath)
+
         files.push({
           path: fullPath,
           projectDir,
@@ -82,7 +93,7 @@ function collectJsonlFiles(
       // Check for subagents subdirectory
       const subagentsDir = join(fullPath, 'subagents')
       if (existsSync(subagentsDir)) {
-        collectJsonlFiles(subagentsDir, projectDir, files, sinceDate)
+        collectJsonlFiles(subagentsDir, projectDir, files, sinceDate, seen)
       }
     }
   }

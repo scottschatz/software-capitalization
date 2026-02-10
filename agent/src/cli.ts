@@ -109,6 +109,14 @@ program
   })
 
 program
+  .command('update')
+  .description('Pull latest code and rebuild the agent')
+  .action(async () => {
+    const { updateCommand } = await import('./commands/update.js')
+    await updateCommand()
+  })
+
+program
   .command('status')
   .description('Show agent status and last sync info')
   .action(async () => {

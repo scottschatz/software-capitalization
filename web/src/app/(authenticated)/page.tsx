@@ -301,24 +301,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
-            <FolderKanban className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{projectCount}</div>
-            <Link
-              href="/projects"
-              className="text-xs text-muted-foreground hover:underline inline-flex items-center gap-1 mt-1"
-            >
-              View projects <ArrowRight className="h-3 w-3" />
-            </Link>
-          </CardContent>
-        </Card>
-
+      {/* Status cards */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending Review</CardTitle>
@@ -342,27 +326,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </CardContent>
         </Card>
 
-        <Card className="sm:col-span-2 lg:col-span-1">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Last Week <span className="text-muted-foreground font-normal">({prevWeekRangeLabel})</span></CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
+            <FolderKanban className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {prevWkConfHours.toFixed(1)}h
-              {prevWkPendHours > 0 && (
-                <span className="text-sm font-normal text-amber-600 ml-1">+{prevWkPendHours.toFixed(1)}h pending</span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              <span className="text-green-600 font-medium">{prevWkConfCap.toFixed(1)}h</span> capitalizable
-              {prevWkPendCap > 0 && (
-                <span className="text-amber-600 ml-1">(+{prevWkPendCap.toFixed(1)}h est.)</span>
-              )}
-            </p>
+            <div className="text-2xl font-bold">{projectCount}</div>
+            <Link
+              href="/projects"
+              className="text-xs text-muted-foreground hover:underline inline-flex items-center gap-1 mt-1"
+            >
+              View projects <ArrowRight className="h-3 w-3" />
+            </Link>
           </CardContent>
         </Card>
+      </div>
 
+      {/* Weekly cards */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">This Week <span className="text-muted-foreground font-normal">({weekRangeLabel})</span></CardTitle>
@@ -386,25 +368,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">{prevMonthLabel}</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Last Week <span className="text-muted-foreground font-normal">({prevWeekRangeLabel})</span></CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {prevMoConfHours.toFixed(1)}h
-              {prevMoPendHours > 0 && (
-                <span className="text-sm font-normal text-amber-600 ml-1">+{prevMoPendHours.toFixed(1)}h pending</span>
+              {prevWkConfHours.toFixed(1)}h
+              {prevWkPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{prevWkPendHours.toFixed(1)}h pending</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              <span className="text-green-600 font-medium">{prevMoConfCap.toFixed(1)}h</span> capitalizable
-              {prevMoPendCap > 0 && (
-                <span className="text-amber-600 ml-1">(+{prevMoPendCap.toFixed(1)}h est.)</span>
+              <span className="text-green-600 font-medium">{prevWkConfCap.toFixed(1)}h</span> capitalizable
+              {prevWkPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{prevWkPendCap.toFixed(1)}h est.)</span>
               )}
             </p>
           </CardContent>
         </Card>
+      </div>
 
+      {/* Monthly cards */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">{currentMonthLabel}</CardTitle>
@@ -421,6 +406,27 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <span className="text-green-600 font-medium">{moConfCap.toFixed(1)}h</span> capitalizable
               {moPendCap > 0 && (
                 <span className="text-amber-600 ml-1">(+{moPendCap.toFixed(1)}h est.)</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">{prevMonthLabel}</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {prevMoConfHours.toFixed(1)}h
+              {prevMoPendHours > 0 && (
+                <span className="text-sm font-normal text-amber-600 ml-1">+{prevMoPendHours.toFixed(1)}h pending</span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              <span className="text-green-600 font-medium">{prevMoConfCap.toFixed(1)}h</span> capitalizable
+              {prevMoPendCap > 0 && (
+                <span className="text-amber-600 ml-1">(+{prevMoPendCap.toFixed(1)}h est.)</span>
               )}
             </p>
           </CardContent>

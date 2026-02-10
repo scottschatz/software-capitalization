@@ -3,7 +3,6 @@ import { requireDeveloper } from '@/lib/get-developer'
 import { listProjects } from '@/lib/actions/project-actions'
 import { prisma } from '@/lib/prisma'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -17,7 +16,8 @@ import { PhaseBadge, StatusBadge } from '@/components/projects/phase-badge'
 import { MonitoringToggle } from '@/components/projects/monitoring-toggle'
 import { ProjectsGuide } from '@/components/projects/projects-guide'
 import { ProjectDeveloperFilter } from '@/components/projects/developer-filter'
-import { Plus, AlertCircle, Scan } from 'lucide-react'
+import { NewProjectButton } from '@/components/projects/new-project-button'
+import { AlertCircle, Scan } from 'lucide-react'
 
 export default async function ProjectsPage({
   searchParams,
@@ -123,13 +123,7 @@ export default async function ProjectsPage({
               currentDevId={params.developer ?? 'all'}
             />
           )}
-          {isManager && (
-            <Link href="/projects/new">
-              <Button>
-                <Plus className="h-4 w-4 mr-1" /> New Project
-              </Button>
-            </Link>
-          )}
+          <NewProjectButton isManager={isManager} />
         </div>
       </div>
 
@@ -138,22 +132,10 @@ export default async function ProjectsPage({
           <Scan className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
           <h3 className="text-lg font-medium">No projects yet</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            {isManager ? (
-              <>
-                Run <code className="bg-muted px-1 rounded">cap sync</code> from your machine
-                to auto-discover projects, or create one manually.
-              </>
-            ) : (
-              'No projects found with your logged time. Projects will appear here after your daily entries are synced.'
-            )}
+            Run <code className="bg-muted px-1 rounded">cap sync</code> from your project
+            directory to auto-discover projects, or create one manually.
           </p>
-          {isManager && (
-            <Link href="/projects/new">
-              <Button className="mt-4">
-                <Plus className="h-4 w-4 mr-1" /> Create Project
-              </Button>
-            </Link>
-          )}
+          <NewProjectButton isManager={isManager} variant="empty-state" />
         </div>
       ) : (
         <div className="rounded-md border">

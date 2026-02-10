@@ -15,22 +15,35 @@ export interface DiscoveredProject {
 
 /**
  * Scan the developer's environment to discover projects.
+ * Supports multiple Claude data directories and path exclusions.
  *
- * 1. Scans ~/.claude/projects/ for Claude Code session directories
+ * 1. Scans Claude projects directories for Claude Code session directories
  * 2. For each Claude path, decodes to local path and checks if it's a git repo
  * 3. Also scans common project directories for git repos not yet linked to Claude paths
  */
-export function discoverProjects(claudeDataDir?: string): DiscoveredProject[] {
+export function discoverProjects(
+  claudeDataDirs?: string | string[],
+  excludePaths?: string[]
+): DiscoveredProject[] {
   const discovered = new Map<string, DiscoveredProject>()
+  const dirs = claudeDataDirs
+    ? (Array.isArray(claudeDataDirs) ? claudeDataDirs : [claudeDataDirs])
+    : [undefined]
 
-  // 1. Scan Claude paths
-  const claudeDir = resolveClaudeDir(claudeDataDir)
-  if (existsSync(claudeDir)) {
-    const dirs = readdirSync(claudeDir, { withFileTypes: true })
+  // 1. Scan Claude paths from all directories
+  for (const dataDir of dirs) {
+    const claudeDir = resolveClaudeDir(dataDir)
+    if (!existsSync(claudeDir)) continue
+
+    const entries = readdirSync(claudeDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
 
-    for (const dir of dirs) {
+    for (const dir of entries) {
       const claudePath = dir.name
+
+      // Check exclusions
+      if (excludePaths?.some((pattern) => claudePath.includes(pattern))) continue
+
       const localPath = claudePathToLocalPath(claudePath)
 
       // Skip if local path doesn't exist
@@ -42,6 +55,9 @@ export function discoverProjects(claudeDataDir?: string): DiscoveredProject[] {
       } catch {
         continue
       }
+
+      // Skip if already discovered from another dir
+      if (discovered.has(localPath)) continue
 
       const hasGit = existsSync(join(localPath, '.git'))
       const repoUrl = hasGit ? getGitRemoteUrl(localPath) : null
@@ -58,6 +74,9 @@ export function discoverProjects(claudeDataDir?: string): DiscoveredProject[] {
     }
   }
 
+  // Use the first resolved claude dir for the ~/projects/ scan
+  const primaryClaudeDir = resolveClaudeDir(dirs[0])
+
   // 2. Scan ~/projects/ for git repos not yet found via Claude paths
   const projectsDir = join(homedir(), 'projects')
   if (existsSync(projectsDir)) {
@@ -73,7 +92,7 @@ export function discoverProjects(claudeDataDir?: string): DiscoveredProject[] {
         if (!hasGit) continue // Only discover git repos from projects dir
 
         const claudePath = localPathToClaudePath(localPath)
-        const hasClaude = existsSync(join(claudeDir, claudePath))
+        const hasClaude = existsSync(join(primaryClaudeDir, claudePath))
         const repoUrl = getGitRemoteUrl(localPath)
 
         discovered.set(localPath, {

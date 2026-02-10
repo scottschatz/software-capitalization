@@ -1,5 +1,5 @@
 import * as readline from 'node:readline'
-import { saveConfig, configExists, getConfigPath } from '../config.js'
+import { saveConfig, configExists, getConfigPath, loadConfig } from '../config.js'
 import type { AgentConfig } from '../config.js'
 
 function prompt(rl: readline.Interface, question: string, defaultValue?: string): Promise<string> {
@@ -28,7 +28,7 @@ export async function initCommand(): Promise<void> {
     }
   }
 
-  const serverUrl = await prompt(rl, 'Server URL', 'http://localhost:3000')
+  const serverUrl = await prompt(rl, 'Server URL', 'https://softwarecapitalization-townsquaremedia0.msappproxy.net')
   const apiKey = await prompt(rl, 'API key (from web UI Settings page)')
 
   if (!apiKey) {
@@ -37,8 +37,59 @@ export async function initCommand(): Promise<void> {
     return
   }
 
-  const developerEmail = await prompt(rl, 'Your email')
-  const claudeDataDir = await prompt(rl, 'Claude Code projects directory', '~/.claude/projects')
+  // Validate API key and fetch developer info from server
+  let serverEmail: string | undefined
+  let serverLastSync: string | undefined
+  console.log('\nValidating API key...')
+  const authHeaders = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+  try {
+    const syncRes = await fetch(`${serverUrl}/api/agent/last-sync`, {
+      headers: authHeaders,
+    })
+    if (syncRes.ok) {
+      const syncData = await syncRes.json()
+      serverEmail = syncData.developerEmail
+      if (syncData.lastSync?.completedAt) {
+        serverLastSync = syncData.lastSync.completedAt
+      }
+      console.log(`  Key valid — registered to ${serverEmail}`)
+    } else if (syncRes.status === 401) {
+      console.error('  Error: Invalid API key. Check your key and try again.')
+      rl.close()
+      return
+    }
+  } catch {
+    console.warn('  Warning: Could not reach server to validate key. Continuing with manual setup.')
+  }
+
+  // Use server email as default, or prompt manually if server unavailable
+  const developerEmail = serverEmail
+    ? await prompt(rl, 'Your email', serverEmail)
+    : await prompt(rl, 'Your email')
+  console.log('\nClaude Code stores session logs in ~/.claude/projects/ (not your source code folder).')
+  const claudeDataDir = await prompt(rl, 'Claude Code session log directory', '~/.claude/projects')
+
+  // Additional monitored directories
+  console.log('\nMonitor additional directories? (one per line, blank line to finish)')
+  console.log('  Examples: ~/work/.claude/projects, ~/personal/.claude/projects')
+  const extraDirs: string[] = []
+  let dir = await prompt(rl, 'Additional directory (blank to skip)')
+  while (dir) {
+    extraDirs.push(dir)
+    dir = await prompt(rl, 'Additional directory (blank to finish)')
+  }
+
+  const claudeDataDirs = [claudeDataDir, ...extraDirs]
+
+  // Exclude patterns
+  console.log('\nExclude patterns? Projects matching these are skipped. (one per line, blank to finish)')
+  console.log('  Examples: node_modules, test-project, .archive')
+  const excludePaths: string[] = []
+  let pattern = await prompt(rl, 'Exclude pattern (blank to skip)')
+  while (pattern) {
+    excludePaths.push(pattern)
+    pattern = await prompt(rl, 'Exclude pattern (blank to finish)')
+  }
 
   // Optional VS Code tracking
   console.log('\nDo you use WakaTime or Code Time for VS Code tracking? (optional)')
@@ -56,36 +107,62 @@ export async function initCommand(): Promise<void> {
     vscodeSource = { type: 'codetime' }
   }
 
+  // Preserve sync state from existing config
+  let existingState: Pick<AgentConfig, 'lastSync' | 'lastConfigVersion'> = {}
+  if (configExists()) {
+    try {
+      const existing = loadConfig()
+      existingState = {
+        ...(existing.lastSync ? { lastSync: existing.lastSync } : {}),
+        ...(existing.lastConfigVersion ? { lastConfigVersion: existing.lastConfigVersion } : {}),
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   const config: AgentConfig = {
     serverUrl,
     apiKey,
     claudeDataDir,
+    claudeDataDirs,
+    excludePaths,
     developerEmail,
     vscodeSource,
+    ...existingState,
   }
 
-  // Verify connection
+  // Apply server last sync if available (prevents full re-scan)
+  if (serverLastSync) {
+    config.lastSync = serverLastSync
+  }
+
+  // Fetch project count for confirmation
   console.log('\nVerifying connection...')
   try {
     const res = await fetch(`${serverUrl}/api/agent/projects`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: authHeaders,
     })
     if (res.ok) {
       const data = await res.json()
       console.log(`  Connected. ${data.projects?.length ?? 0} projects found.`)
-    } else if (res.status === 401) {
-      console.warn('  Warning: Authentication failed. Check your API key.')
-      console.warn('  Config will be saved anyway — you can update the key later.')
+      if (config.lastSync) {
+        console.log(`  Last sync: ${new Date(config.lastSync).toLocaleString()}`)
+      }
     } else {
-      console.warn(`  Warning: Server returned ${res.status}. Config will be saved anyway.`)
+      console.warn(`  Warning: Server returned ${res.status}.`)
     }
-  } catch (e) {
+  } catch {
     console.warn(`  Warning: Could not connect to ${serverUrl}. Config will be saved anyway.`)
   }
 
   saveConfig(config)
+
   console.log(`\nConfig saved to ${getConfigPath()}`)
-  console.log('Run \'cap sync --dry-run\' to preview what would be synced.\n')
+  console.log(`  Monitored: ${claudeDataDirs.join(', ')}`)
+  if (excludePaths.length > 0) {
+    console.log(`  Excludes:  ${excludePaths.join(', ')}`)
+  }
+  console.log('\nRun \'cap sync --dry-run\' to preview what would be synced.')
+  console.log('You can also manage these settings from the web UI (Settings > gear icon).\n')
 
   rl.close()
 }

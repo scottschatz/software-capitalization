@@ -6,6 +6,7 @@ import { AdjustmentFactorSetting } from '@/components/settings/adjustment-factor
 export default async function SettingsPage() {
   const developer = await requireDeveloper()
   const keys = await listAgentKeys(developer.id)
+  const serverUrl = process.env.NEXTAUTH_URL || 'https://softwarecapitalization-townsquaremedia0.msappproxy.net'
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -17,7 +18,11 @@ export default async function SettingsPage() {
       </div>
 
       <AdjustmentFactorSetting initialFactor={developer.adjustmentFactor} />
-      <AgentKeysManager initialKeys={keys} />
+      <AgentKeysManager
+        initialKeys={keys}
+        developerEmail={developer.email}
+        serverUrl={serverUrl}
+      />
     </div>
   )
 }

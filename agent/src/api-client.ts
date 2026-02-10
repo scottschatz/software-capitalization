@@ -1,4 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import type { AgentConfig } from './config.js'
+
+// Read version from package.json at module load
+const __agentDir = dirname(fileURLToPath(import.meta.url))
+const pkg = JSON.parse(readFileSync(join(__agentDir, '..', 'package.json'), 'utf-8'))
+export const AGENT_VERSION: string = pkg.version
 
 export interface SyncPayload {
   syncType: 'incremental' | 'backfill' | 'reparse'
@@ -63,6 +71,7 @@ export interface SyncResult {
 }
 
 export interface LastSyncResult {
+  developerEmail: string
   lastSync: {
     id: string
     completedAt: string
@@ -108,12 +117,20 @@ export interface AgentRemoteConfig {
     weekend: string
   }
   generateSchedule: string
+  // Per-agent settings (managed via web UI)
+  claudeDataDirs?: string[]
+  excludePaths?: string[]
+  // Version info
+  latestVersion?: string
+  minSupportedVersion?: string
+  updateUrl?: string
 }
 
 function headers(config: AgentConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${config.apiKey}`,
     'Content-Type': 'application/json',
+    'X-Agent-Version': AGENT_VERSION,
   }
 }
 
@@ -159,6 +176,33 @@ export async function fetchAgentConfig(config: AgentConfig): Promise<AgentRemote
     return res.json()
   } catch {
     return null // Non-fatal — server may not support this endpoint yet
+  }
+}
+
+export interface AgentStateReport {
+  hostname: string
+  osInfo: string
+  discoveredPaths: Array<{
+    localPath: string
+    claudePath: string | null
+    hasGit: boolean
+    excluded: boolean
+  }>
+  hooksInstalled: boolean
+}
+
+export async function reportAgentState(config: AgentConfig, state: AgentStateReport): Promise<void> {
+  try {
+    const res = await fetch(`${config.serverUrl}/api/agent/report-state`, {
+      method: 'POST',
+      headers: headers(config),
+      body: JSON.stringify(state),
+    })
+    if (!res.ok) {
+      console.log(`  Warning: state report failed (${res.status})`)
+    }
+  } catch {
+    // Non-fatal — server may not support this endpoint yet
   }
 }
 

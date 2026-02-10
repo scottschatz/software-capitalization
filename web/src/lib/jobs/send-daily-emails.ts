@@ -56,7 +56,7 @@ export async function sendDailyEmails(targetDate?: Date): Promise<{
         hours: e.hoursEstimated ?? 0,
         phase: e.phaseAuto ?? e.project?.phase ?? 'unknown',
         description: e.descriptionAuto?.split('\n---\n')[0] ?? '',
-        capitalizable: (e.phaseAuto ?? e.project?.phase) === 'application_development',
+        capitalizable: (e.phaseEffective ?? e.phaseAuto ?? e.project?.phase) === 'application_development',
       })),
     }
 

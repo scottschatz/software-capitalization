@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     })
 
     return NextResponse.json({
+      developerEmail: auth.developer.email,
       lastSync: lastSync
         ? {
             id: lastSync.id,

@@ -128,6 +128,7 @@ export default async function ReviewDatePage({
     date: e.date.toISOString(),
     hoursEstimated: e.hoursEstimated,
     phaseAuto: e.phaseAuto,
+    phaseEffective: e.phaseEffective,
     descriptionAuto: e.descriptionAuto,
     hoursConfirmed: e.hoursConfirmed,
     phaseConfirmed: e.phaseConfirmed,
@@ -188,7 +189,7 @@ export default async function ReviewDatePage({
   const confirmedCount = entries.filter((e) => e.status === 'confirmed').length
   const totalHours = entries.reduce((sum, e) => sum + (e.hoursConfirmed ?? e.hoursEstimated ?? 0), 0)
   const capHours = entries
-    .filter((e) => (e.phaseConfirmed ?? e.phaseAuto) === 'application_development')
+    .filter((e) => (e.phaseEffective ?? e.phaseConfirmed ?? e.phaseAuto) === 'application_development')
     .reduce((sum, e) => sum + (e.hoursConfirmed ?? e.hoursEstimated ?? 0), 0)
 
   return (

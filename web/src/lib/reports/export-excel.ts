@@ -89,7 +89,9 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
     { header: 'Developer', key: 'developer', width: 20 },
     { header: 'Project', key: 'project', width: 25 },
     { header: 'Hours', key: 'hours', width: 10 },
-    { header: 'Phase', key: 'phase', width: 24 },
+    { header: 'Phase (Developer)', key: 'phaseDev', width: 24 },
+    { header: 'Phase (Effective)', key: 'phaseEff', width: 24 },
+    { header: 'Override', key: 'override', width: 10 },
     { header: 'Work Type', key: 'workType', width: 16 },
     { header: 'Type', key: 'type', width: 14 },
     { header: 'Capitalizable', key: 'cap', width: 14 },
@@ -107,7 +109,7 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
 
   // Insert legend row above headers (pushes headers to row 2)
   detail.spliceRows(1, 0, ['Note: Rows highlighted in light blue indicate entries modified after initial confirmation (revision count > 0).'])
-  detail.mergeCells('A1:R1')
+  detail.mergeCells('A1:T1')
   const legendCell = detail.getCell('A1')
   legendCell.font = { italic: true, color: { argb: 'FF6B7280' } }
 
@@ -128,7 +130,9 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
     developer: string
     project: string
     hours: number
-    phase: string
+    phaseDev: string
+    phaseEff: string
+    override: string
     workType: string
     type: string
     cap: string
@@ -148,13 +152,16 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
   const allRows: DetailRowData[] = []
 
   for (const e of data.dailyEntries) {
-    const phase = e.phaseConfirmed ?? e.projectPhase ?? ''
+    const devPhase = e.phaseConfirmed ?? e.projectPhase ?? ''
+    const effPhase = e.phaseEffective ?? devPhase
     allRows.push({
       date: format(new Date(e.date), 'yyyy-MM-dd'),
       developer: e.developerName,
       project: e.projectName ?? '',
       hours: e.hoursConfirmed ?? e.hoursEstimated ?? 0,
-      phase: PHASE_LABELS[phase] ?? phase,
+      phaseDev: PHASE_LABELS[devPhase] ?? devPhase,
+      phaseEff: PHASE_LABELS[effPhase] ?? effPhase,
+      override: e.phaseEffective && e.phaseEffective !== devPhase ? 'Yes' : '',
       workType: e.workType ?? '',
       type: 'AI-Generated',
       cap: e.capitalizable ? 'Yes' : 'No',
@@ -181,7 +188,9 @@ export async function buildExcelReport(data: ExcelReportData): Promise<ArrayBuff
       developer: e.developerName,
       project: e.projectName,
       hours: e.hours,
-      phase: PHASE_LABELS[e.phase] ?? e.phase,
+      phaseDev: PHASE_LABELS[e.phase] ?? e.phase,
+      phaseEff: PHASE_LABELS[e.phaseEffective ?? e.phase] ?? (e.phaseEffective ?? e.phase),
+      override: e.phaseEffective && e.phaseEffective !== e.phase ? 'Yes' : '',
       workType: '',
       type: 'Manual',
       cap: e.capitalizable ? 'Yes' : 'No',

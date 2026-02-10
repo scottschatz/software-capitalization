@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
       }
 
       return { sessionsCreated, sessionsUpdated, sessionsSkipped, commitsCreated, commitsSkipped }
-    }, { timeout: 30000 })
+    }, { timeout: 120000 })
 
     // Mark sync complete
     await prisma.agentSyncLog.update({

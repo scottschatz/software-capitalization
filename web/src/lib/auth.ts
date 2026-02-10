@@ -1,7 +1,6 @@
 import { NextAuthOptions } from 'next-auth'
 import AzureADProvider from 'next-auth/providers/azure-ad'
 import CredentialsProvider from 'next-auth/providers/credentials'
-import { PrismaAdapter } from '@auth/prisma-adapter'
 import { prisma } from './prisma'
 
 const providers: NextAuthOptions['providers'] = []
@@ -60,11 +59,11 @@ if (process.env.DEV_AUTH_BYPASS === 'true' && process.env.NODE_ENV !== 'producti
 }
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as NextAuthOptions['adapter'],
+  // No PrismaAdapter — schema uses "Developer" not "User".
+  // Developer provisioning handled in signIn callback; lookup in session callback.
   providers,
   session: {
-    // Use JWT for credentials provider compatibility, database for Azure AD
-    strategy: process.env.DEV_AUTH_BYPASS === 'true' ? 'jwt' : 'database',
+    strategy: 'jwt',
   },
   callbacks: {
     async signIn({ user, profile }) {

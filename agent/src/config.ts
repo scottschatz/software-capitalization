@@ -6,6 +6,8 @@ export interface AgentConfig {
   serverUrl: string
   apiKey: string
   claudeDataDir: string
+  claudeDataDirs?: string[]
+  excludePaths?: string[]
   developerEmail: string
   vscodeSource?: {
     type: 'wakatime' | 'codetime' | 'none'
@@ -14,6 +16,11 @@ export interface AgentConfig {
   }
   lastSync?: string
   lastConfigVersion?: number
+}
+
+export function getClaudeDataDirs(config: AgentConfig): string[] {
+  if (config.claudeDataDirs?.length) return config.claudeDataDirs
+  return [config.claudeDataDir]
 }
 
 const CONFIG_DIR = join(homedir(), '.cap-agent')

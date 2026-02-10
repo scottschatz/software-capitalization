@@ -100,15 +100,30 @@ model VerificationToken {
 }
 
 model AgentKey {
-  id           String    @id @default(uuid())
-  developerId  String    @map("developer_id")
-  keyHash      String    @unique @map("key_hash")
-  keyPrefix    String    @map("key_prefix") // first 12 chars for display
-  name         String    @default("Default")
-  active       Boolean   @default(true)
-  machineName  String?   @map("machine_name")
-  lastUsedAt   DateTime? @map("last_used_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id               String    @id @default(uuid())
+  developerId      String    @map("developer_id")
+  keyHash          String    @unique @map("key_hash")
+  keyPrefix        String    @map("key_prefix") // first 12 chars for display
+  name             String    @default("Default")
+  active           Boolean   @default(true)
+  machineName      String?   @map("machine_name")
+  lastUsedAt       DateTime? @map("last_used_at")
+  lastKnownVersion String?   @map("last_known_version")
+  claudeDataDirs   String[]  @default(["~/.claude/projects"]) @map("claude_data_dirs")
+  excludePaths     String[]  @default([]) @map("exclude_paths")
+
+  // Agent-reported machine state (updated on each sync)
+  hostname         String?   @map("hostname")
+  osInfo           String?   @map("os_info")
+  discoveredPaths  Json?     @map("discovered_paths")
+  hooksInstalled   Boolean   @default(false) @map("hooks_installed")
+  lastReportedAt   DateTime? @map("last_reported_at")
+
+  // Per-agent sync schedule overrides (null = use global default)
+  syncScheduleWeekday String? @map("sync_schedule_weekday")
+  syncScheduleWeekend String? @map("sync_schedule_weekend")
+
+  createdAt        DateTime  @default(now()) @map("created_at")
 
   developer Developer    @relation(fields: [developerId], references: [id])
   syncLogs  AgentSyncLog[]
@@ -419,6 +434,9 @@ model DailyEntry {
   confirmationMethod   String?   @map("confirmation_method") // individual | bulk | bulk_range | email_token
   developerNote        String?   @map("developer_note") @db.Text  // optional free-text note from developer
 
+  // Manager-authoritative phase override — set by phase change cascade
+  phaseEffective       String?   @map("phase_effective")
+
   // Manager approval (segregation of duties)
   approvedById         String?   @map("approved_by_id")
   approvedAt           DateTime? @map("approved_at")
@@ -455,6 +473,9 @@ model ManualEntry {
   hours       Float
   phase       String
   description String   @db.Text
+
+  // Manager-authoritative phase override — set by phase change cascade
+  phaseEffective  String?   @map("phase_effective")
 
   // Approval workflow
   status          String    @default("confirmed") // pending_approval | approved | confirmed | rejected
