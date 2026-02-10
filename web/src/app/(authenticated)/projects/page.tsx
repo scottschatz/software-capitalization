@@ -68,6 +68,17 @@ export default async function ProjectsPage({
     devsByProject.set(row.projectId, list)
   }
 
+  // Include project creator in developers list (for newly discovered projects with no entries yet)
+  for (const project of projects) {
+    if (project.createdBy) {
+      const list = devsByProject.get(project.id) ?? []
+      if (!list.some((d) => d.id === project.createdBy!.id)) {
+        list.push(project.createdBy)
+        devsByProject.set(project.id, list)
+      }
+    }
+  }
+
   // Group projects into parent → enhancement hierarchy
   const parentProjects = projects.filter((p) => !p.parentProjectId)
   const enhancementsByParent = new Map<string, typeof projects>()

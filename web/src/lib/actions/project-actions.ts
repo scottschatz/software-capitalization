@@ -308,6 +308,7 @@ export async function listProjects(query: ListProjectsQuery = {}) {
       repos: true,
       claudePaths: true,
       parentProject: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, displayName: true } },
       _count: {
         select: {
           phaseChangeRequests: { where: { status: 'pending' } },
