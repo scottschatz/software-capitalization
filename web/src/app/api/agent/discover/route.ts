@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     let updated = 0
 
     for (const disc of payload.projects) {
-      // Check if project already exists by matching repo path or claude path
+      // Check if project already exists by matching repo path, claude path, or repo URL
       const existingByRepo = disc.repoPath
         ? await prisma.projectRepo.findFirst({
             where: { repoPath: disc.repoPath },
@@ -47,7 +47,15 @@ export async function POST(request: NextRequest) {
           })
         : null
 
-      const existingProject = existingByRepo?.project ?? existingByClaudePath?.project
+      // Match by git remote URL — same repo across different machines
+      const existingByRepoUrl = !existingByRepo && disc.repoUrl
+        ? await prisma.projectRepo.findFirst({
+            where: { repoUrl: disc.repoUrl },
+            include: { project: true },
+          })
+        : null
+
+      const existingProject = existingByRepo?.project ?? existingByClaudePath?.project ?? existingByRepoUrl?.project
 
       if (existingProject) {
         // Update: add missing repo or claude path links
