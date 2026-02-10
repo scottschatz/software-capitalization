@@ -92,10 +92,12 @@ export async function initCommand(): Promise<void> {
   }
 
   // Optional VS Code tracking
-  console.log('\nDo you use WakaTime or Code Time for VS Code tracking? (optional)')
-  console.log('  1. Skip (recommended if you primarily use Claude Code)')
-  console.log('  2. WakaTime')
-  console.log('  3. Code Time')
+  console.log('\nDo you use WakaTime or Code Time? (VS Code extensions that track coding time)')
+  console.log('  These capture time spent editing in VS Code — useful if you do significant')
+  console.log('  manual coding outside of Claude Code sessions.')
+  console.log('  1. Skip (recommended — most dev time is captured via Claude Code sessions + git)')
+  console.log('  2. WakaTime (wakatime.com — requires API key)')
+  console.log('  3. Code Time (software.com — reads local data)')
   const vscodeChoice = await prompt(rl, 'Choice', '1')
 
   let vscodeSource: AgentConfig['vscodeSource'] = { type: 'none' }
