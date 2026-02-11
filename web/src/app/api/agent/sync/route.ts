@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { authenticateAgent } from '@/lib/agent-auth'
 import { prisma } from '@/lib/prisma'
 import { syncPayloadSchema } from '@/lib/validations/sync'
+import { generateEntriesForDate } from '@/lib/jobs/generate-daily-entries'
+import { subDays, format } from 'date-fns'
 
 // POST /api/agent/sync — Receive session + commit data from local agent
 export async function POST(request: NextRequest) {
@@ -165,6 +167,30 @@ export async function POST(request: NextRequest) {
         commitsCount: result.commitsCreated,
       },
     })
+
+    // After successful sync, auto-generate entries for recent completed days.
+    // Fire-and-forget: don't block the sync response.
+    // Only generate for days before today (today's data is incomplete).
+    if (result.sessionsCreated > 0 || result.commitsCreated > 0) {
+      const today = new Date()
+      const daysToCheck = Array.from({ length: 7 }, (_, i) =>
+        subDays(today, i + 1) // yesterday through 7 days ago
+      )
+
+      // Run in background — errors are logged but don't affect sync response
+      void (async () => {
+        for (const date of daysToCheck) {
+          try {
+            const result = await generateEntriesForDate(date)
+            if (result.entriesCreated > 0) {
+              console.log(`[post-sync-generate] ${result.date}: ${result.entriesCreated} entries created`)
+            }
+          } catch (err) {
+            console.error(`[post-sync-generate] ${format(date, 'yyyy-MM-dd')}: ${err instanceof Error ? err.message : err}`)
+          }
+        }
+      })()
+    }
 
     return NextResponse.json({
       syncLogId: syncLog.id,
