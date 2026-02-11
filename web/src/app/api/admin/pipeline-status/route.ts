@@ -100,7 +100,7 @@ export async function GET() {
 
   const rawSessions = await prisma.rawSession.findMany({
     where: { startedAt: { gte: fourteenDaysAgo } },
-    select: { developerId: true, startedAt: true, dailyBreakdown: true },
+    select: { developerId: true, startedAt: true, endedAt: true, dailyBreakdown: true },
   })
 
   const rawCommits = await prisma.rawCommit.findMany({
@@ -113,20 +113,33 @@ export async function GET() {
     select: { developerId: true, date: true, status: true },
   })
 
-  // Build per-date, per-developer counts
+  // Build per-date, per-developer counts + track latest activity timestamp
   const sessionCounts: Record<string, Record<string, number>> = {}
+  const lastActivityByDevDate: Record<string, Record<string, Date>> = {}
+
+  function trackActivity(dateStr: string, devId: string, ts: Date) {
+    lastActivityByDevDate[dateStr] ??= {}
+    const existing = lastActivityByDevDate[dateStr][devId]
+    if (!existing || ts > existing) {
+      lastActivityByDevDate[dateStr][devId] = ts
+    }
+  }
+
   for (const s of rawSessions) {
+    const activityTs = s.endedAt ?? s.startedAt
     if (s.dailyBreakdown && Array.isArray(s.dailyBreakdown)) {
       for (const day of s.dailyBreakdown as Array<{ date: string }>) {
         if (!dates.includes(day.date)) continue
         sessionCounts[day.date] ??= {}
         sessionCounts[day.date][s.developerId] = (sessionCounts[day.date][s.developerId] ?? 0) + 1
+        trackActivity(day.date, s.developerId, activityTs)
       }
     } else {
       const dateStr = formatDate(s.startedAt)
       if (!dates.includes(dateStr)) continue
       sessionCounts[dateStr] ??= {}
       sessionCounts[dateStr][s.developerId] = (sessionCounts[dateStr][s.developerId] ?? 0) + 1
+      trackActivity(dateStr, s.developerId, activityTs)
     }
   }
 
@@ -136,6 +149,7 @@ export async function GET() {
     if (!dates.includes(dateStr)) continue
     commitCounts[dateStr] ??= {}
     commitCounts[dateStr][c.developerId] = (commitCounts[dateStr][c.developerId] ?? 0) + 1
+    trackActivity(dateStr, c.developerId, c.committedAt)
   }
 
   const entryCounts: Record<string, Record<string, { total: number; pending: number; confirmed: number; flagged: number }>> = {}
@@ -162,9 +176,15 @@ export async function GET() {
       const hasRawData = sessions > 0 || commits > 0
       const hasEntries = (ec?.total ?? 0) > 0
 
-      // Sync is complete for this day if last sync happened after the day ended
+      // Sync is complete for this day if the last sync happened after the developer's
+      // last raw activity on that date. This avoids false "not synced" when a developer
+      // stops working at 4 PM, the 4 PM sync captures everything, but no sync runs
+      // after midnight (because the agent correctly finds nothing new to send).
       const devLastSync = lastSyncByDev[dev.id]
-      const syncComplete = devLastSync ? devLastSync > endOfDay : false
+      const devLastActivity = lastActivityByDevDate[dateStr]?.[dev.id]
+      const syncComplete = devLastSync
+        ? devLastSync > (devLastActivity ?? endOfDay)
+        : false
 
       return {
         developerId: dev.id,
