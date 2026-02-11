@@ -48,7 +48,10 @@ Ideas and planned features organized by phase.
 | Agent Error Handling + Retry | M | Medium | ✅ Shipped |
 | Agent Self-Update Check | S | Low | ⬜ Backlog |
 | systemd Timer Templates | S | Medium | ✅ Shipped |
+| Post-Sync Auto-Generation | S | High | ✅ Shipped |
+| Activity-Based Pipeline Status | S | Medium | ✅ Shipped |
 | App Proxy / Reverse Proxy Setup | M | Medium | ⬜ Backlog |
+| phaseEffective (Manager Override) | L | High | 🔄 In Progress |
 
 ## v2.0 — Future
 

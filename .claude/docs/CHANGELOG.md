@@ -2,6 +2,25 @@
 
 All notable changes documented here.
 
+## [0.9.0] - 2026-02-11
+
+### Added — Multi-Developer Onboarding, Server-Side Generation, Pipeline Fixes
+- **Post-Sync Auto-Generation**: After a successful sync with new data, the server now auto-generates entries for the last 7 completed days (fire-and-forget, idempotent). Replaces the old agent-side generation timer.
+- **Inline Enhancement Workflow**: When developers select "capitalizable" on a post-implementation project entry, an inline panel appears to create or select an enhancement project and reassign the entry — directly in the entry review card.
+- **Activity-Based Sync Status**: Pipeline status `syncComplete` now checks if the last sync happened after the developer's last raw activity on that date, instead of requiring a sync after midnight. Eliminates false "not synced" indicators.
+- **Second Developer Onboarded**: Joe Ainsworth added as developer with agent key and systemd timer.
+
+### Changed
+- **Agent Timer (sync-only)**: `install-timer.sh` rewritten to only install the sync timer. Generation is now server-side (post-sync hook). Old `cap-generate` timer automatically cleaned up on reinstall.
+- **Timer Portability**: Service files now use `__PROJECT_DIR__` and `__NPX__` placeholders, substituted at install time. Works across machines without hardcoded paths.
+- **Enhancement Route Access**: `POST /api/projects/[id]/enhancements` no longer requires admin/manager role — any authenticated developer can create enhancement projects (needed for review-flow enhancement creation).
+
+### Fixed
+- **Pipeline "Not Synced" False Positive**: Developers who stopped working at 4 PM, with a 4 PM sync capturing everything, no longer show as "not synced" until the next day's first sync.
+- **systemd Availability Check**: `install-timer.sh` now checks if systemd is running before attempting install, with WSL2-specific instructions if not.
+
+---
+
 ## [0.8.1] - 2026-02-09
 
 ### Added — Dashboard Reorganization & Documentation

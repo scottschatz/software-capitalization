@@ -320,6 +320,47 @@ Add a minimum activity threshold: if matched source sessions have < 3 messages A
 
 ---
 
+## Post-Sync Auto-Generation (Server-Side)
+- **Date**: 2026-02-11
+- **Status**: Accepted
+
+### Context
+Entry generation was previously triggered by a separate systemd timer on each developer's machine. This required agent-side setup and meant generation only happened at fixed times regardless of sync timing. With multiple developers, generation should be centralized.
+
+### Decision
+Move generation to a server-side post-sync hook. After a successful sync with new data (`sessionsCreated > 0 || commitsCreated > 0`), the server fires off async entry generation for the last 7 completed days. Fire-and-forget: errors are logged but don't block the sync response. Agent `install-timer.sh` updated to be sync-only and clean up old generate timer.
+
+### Alternatives
+1. **Scheduled server cron**: Would require separate scheduler infrastructure (not just Next.js)
+2. **Agent-side generation**: Requires each machine to have generation timer; doesn't scale to multiple developers
+3. **Webhook from agent to trigger generation**: Extra complexity for same result
+
+### Consequences
+- **Positive**: Generation happens immediately after new data arrives; centralized; no agent-side setup needed; idempotent (safe to call repeatedly)
+- **Negative**: Fire-and-forget means generation errors are only visible in server logs; generation tied to sync frequency
+
+---
+
+## Activity-Based Pipeline Sync Status
+- **Date**: 2026-02-11
+- **Status**: Accepted
+
+### Context
+Pipeline status checked `lastSync > endOfDay` to determine if a day was fully synced. This caused false "not synced" indicators when a developer's last sync captured all their activity but no subsequent sync ran after midnight (because the agent correctly found nothing new to send).
+
+### Decision
+Change `syncComplete` to check `lastSync > lastActivityTimestamp` per developer per date. Track the latest raw activity (session endedAt or commit committedAt) for each developer on each date. If the last sync happened after their last activity, the day is fully synced. Falls back to `endOfDay` if no activity is tracked.
+
+### Alternatives
+1. **Agent heartbeat**: Have agent send empty "ping" syncs to update server timestamp — adds unnecessary network traffic
+2. **Keep end-of-day check**: Technically correct but confusing UX; pipeline shows "not synced" even when data is complete
+
+### Consequences
+- **Positive**: Accurate sync status; no false alarms; no agent changes needed
+- **Negative**: Slightly more complex query (tracks per-developer per-date activity timestamps)
+
+---
+
 ## When to Record
 
 Record decisions for:

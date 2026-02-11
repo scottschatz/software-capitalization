@@ -24,6 +24,20 @@
 - **Proper Fix**: Upstream model fix or switching to a more stable local model. Could also add input sanitization if specific content patterns are identified.
 - **Added**: 2026-02-09
 
+### [MEDIUM] EMAIL_WEBHOOK_SECRET is optional — inbound endpoint unauthenticated
+- **Location**: `web/src/app/api/email-reply/inbound/route.ts:19`
+- **Symptom**: If `EMAIL_WEBHOOK_SECRET` is not set, the inbound email webhook endpoint accepts unauthenticated requests
+- **Workaround**: Set `EMAIL_WEBHOOK_SECRET` in production environment
+- **Proper Fix**: Make `EMAIL_WEBHOOK_SECRET` required when email features are enabled; fail fast on startup if missing
+- **Added**: 2026-02-11
+
+### [MEDIUM] Period lock check inconsistency in entry generation
+- **Location**: `web/src/lib/jobs/generate-daily-entries.ts:75-80`
+- **Symptom**: Entry generation for locked periods logs a message and skips but doesn't fail explicitly. Generated entries for locked periods can't be confirmed, creating confusing UX.
+- **Workaround**: None needed — entries for locked periods are skipped with a log message
+- **Proper Fix**: Add explicit period lock check at generation start and skip with clear feedback
+- **Added**: 2026-02-11
+
 ### [LOW] No post-release phase enforcement
 - **Location**: `web/src/lib/ai/prompts.ts`, project UI
 - **Symptom**: When a released project has significant new feature work, the system doesn't force creation of a new project phase

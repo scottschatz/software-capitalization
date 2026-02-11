@@ -1,6 +1,6 @@
 # Architecture Overview
 
-> Last updated: 2026-02-09
+> Last updated: 2026-02-11
 
 ## Tech Stack
 
@@ -19,7 +19,7 @@
 | Forms | React Hook Form | 7.71.1 | Form state management |
 | Agent CLI | Commander.js | 14.0.0 | CLI framework |
 | MCP | @modelcontextprotocol/sdk | 1.x | Claude-native tool access |
-| Testing | Vitest | 3.x | Unit testing (311 test cases) |
+| Testing | Vitest | 3.x | Unit testing (311+ test cases) |
 | Language | TypeScript | 5.x | Type safety |
 | Runtime | Node.js | 20.19 | Server runtime |
 
@@ -48,7 +48,7 @@ software-capitalization/
 │       │   │   ├── reports/          # Monthly reports, project detail, unconfirmed
 │       │   │   ├── settings/         # Agent key management, system health (admin)
 │       │   │   └── team/             # Team admin (developer management)
-│       │   ├── api/                  # 52 API routes
+│       │   ├── api/                  # 56 API routes
 │       │   │   ├── agent/            # sync, projects, last-sync, discover, hooks/*, entries/*, hours, activity
 │       │   │   ├── auth/             # NextAuth
 │       │   │   ├── email-reply/      # approve, inbound
@@ -139,7 +139,7 @@ software-capitalization/
 The system collects developer activity through two complementary mechanisms:
 
 ### Cap Agent (Primary — Batch Sync)
-The `cap sync` CLI is the **authoritative data source**. Runs on schedule (every 4h via cron) or on demand.
+The `cap sync` CLI is the **authoritative data source**. Runs on schedule (every 2h via systemd timer during business hours) or on demand.
 
 | Data Source | What It Captures | Stored In |
 |-------------|-----------------|-----------|
@@ -181,10 +181,12 @@ Enforced by PostgreSQL `BEFORE UPDATE/DELETE` triggers in `prisma/immutability_t
    Hooks (optional): PostToolUse → POST /api/agent/hooks/tool-event → raw_tool_events
                      Stop → POST /api/agent/hooks/session-event → raw_sessions.ended_at
 
-2. AI Entry Generation (systemd timer, 7 AM ET)
+2. AI Entry Generation (post-sync auto-trigger)
+   After each sync with new data, server generates entries for last 7 completed days.
    Queries raw_sessions + raw_commits + raw_tool_events by developer+date
    → Local LLM (primary) or Anthropic Haiku (fallback) generates entries
    → daily_entries (status: pending)
+   Also available: manual trigger via admin API or `cap generate` CLI.
 
 3. Developer Review (email at 8 AM ET or web UI or MCP)
    "Approve All" email button → GET /api/email-reply/approve → confirmed
@@ -203,7 +205,7 @@ Enforced by PostgreSQL `BEFORE UPDATE/DELETE` triggers in `prisma/immutability_t
 | Agent API | Bearer token → SHA-256 hash lookup | `agent_keys` table |
 | Email actions | Signed JWT (72h expiry) | URL query param |
 
-## Database Schema (26 Models)
+## Database Schema (26 Models, with `phaseEffective` planned)
 
 - **Auth**: Developer, Account, Session, VerificationToken, AgentKey
 - **Immutable Raw Data**: RawSession, RawCommit, RawVscodeActivity, RawToolEvent, AgentSyncLog
